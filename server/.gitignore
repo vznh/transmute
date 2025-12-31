@@ -1,0 +1,3 @@
+# python-specific shit
+__pycache__/
+.venv/
