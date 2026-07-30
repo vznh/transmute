@@ -414,6 +414,8 @@ class App:
             return False
         if text.startswith("/"):
             self.commands.dispatch(text)
+            if text.split(maxsplit=1)[0].lower() == "/key":
+                buff.text = "/key"  # never append a pasted key to command history
             return False
 
         urls = extract_urls(text)

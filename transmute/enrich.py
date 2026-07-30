@@ -1,4 +1,4 @@
-"""Metadata enrichment: Claude + web search → proper ID3 tags."""
+"""Metadata enrichment: subscription or API web research → proper ID3 tags."""
 
 from __future__ import annotations
 
@@ -10,9 +10,44 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-MODEL = "claude-opus-4-8"
+ANTHROPIC_MODEL = "claude-opus-4-8"
+OPENAI_MODEL = "gpt-5.6-terra"
 MAX_SEARCHES = 4
 MAX_CONTINUATIONS = 3
+BACKEND_LABELS = {
+    "codex": "Codex (ChatGPT subscription)",
+    "claude": "Claude subscription",
+    "openai_api": "OpenAI API",
+    "anthropic_api": "Anthropic API",
+    "none": "no provider",
+}
+
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kind": {"type": "string", "enum": ["original", "reupload", "derivative"]},
+        "based_on": {"type": ["string", "null"]},
+        "artist": {"type": "string"},
+        "title": {"type": "string"},
+        "album": {"type": ["string", "null"]},
+        "album_artist": {"type": ["string", "null"]},
+        "year": {"type": ["string", "null"]},
+        "genre": {"type": ["string", "null"]},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+    },
+    "required": [
+        "kind",
+        "based_on",
+        "artist",
+        "title",
+        "album",
+        "album_artist",
+        "year",
+        "genre",
+        "confidence",
+    ],
+    "additionalProperties": False,
+}
 
 PROMPT = """\
 You are a music metadata expert identifying a track uploaded to YouTube/SoundCloud.
@@ -88,30 +123,111 @@ class TrackTags:
 
 
 class Enricher:
-    """Metadata lookup via Claude.
+    """Metadata lookup through subscription CLIs or provider APIs.
 
-    Prefers the local `claude` CLI (billed to the user's Claude subscription — the
-    same login Claude Code uses). Falls back to the Anthropic SDK only when
-    ANTHROPIC_API_KEY is explicitly set. Disables itself on auth failure.
+    One API key can be active at a time. A key entered in the app overrides
+    environment credentials and subscription CLIs. Otherwise, environment API
+    keys take priority, followed by Claude and Codex subscription auth.
     """
 
     def __init__(self) -> None:
         self.enabled = True
         self.last_error: str | None = None
-        self._client = None
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            self.backend = "sdk"
-        elif shutil.which("claude"):
-            self.backend = "subscription"
-        else:
-            self.backend = "sdk"  # last resort: SDK's own credential resolution
+        self._api_key: str | None = None
+        self._api_provider: str | None = None
+        self._api_key_source: str | None = None
+        self._anthropic_client = None
+        self._openai_client = None
+        self._select_default_backend()
 
-    def _get_client(self):
-        if self._client is None:
+    def _select_default_backend(self) -> None:
+        self.enabled = True
+        self.last_error = None
+        if os.environ.get("OPENAI_API_KEY"):
+            self._set_api_key(
+                os.environ["OPENAI_API_KEY"], "openai_api", source="environment"
+            )
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            self._set_api_key(
+                os.environ["ANTHROPIC_API_KEY"],
+                "anthropic_api",
+                source="environment",
+            )
+        elif shutil.which("claude"):
+            self.backend = "claude"
+        elif shutil.which("codex"):
+            self.backend = "codex"
+        else:
+            self.backend = "none"
+            self.enabled = False
+
+    @property
+    def backend_label(self) -> str:
+        return BACKEND_LABELS[self.backend]
+
+    @property
+    def has_api_key(self) -> bool:
+        return self._api_key is not None
+
+    @property
+    def api_key_source(self) -> str | None:
+        return self._api_key_source
+
+    def use_backend(self, backend: str) -> None:
+        self.backend = backend
+        self.enabled = True
+        self.last_error = None
+
+    @staticmethod
+    def detect_api_provider(key: str) -> str:
+        key = key.strip()
+        if key.startswith("sk-ant-"):
+            return "anthropic_api"
+        if key.startswith("sk-"):
+            return "openai_api"
+        raise ValueError("key must start with sk- (OpenAI) or sk-ant- (Anthropic)")
+
+    def _set_api_key(self, key: str, provider: str, *, source: str) -> None:
+        self._api_key = key.strip()
+        self._api_provider = provider
+        self._api_key_source = source
+        self._anthropic_client = None
+        self._openai_client = None
+        self.use_backend(provider)
+
+    def set_api_key(self, key: str) -> None:
+        """Replace the active in-memory key and select its detected provider."""
+        provider = self.detect_api_provider(key)
+        self._set_api_key(key, provider, source="entered")
+
+    def clear_api_key(self) -> None:
+        self._api_key = None
+        self._api_provider = None
+        self._api_key_source = None
+        self._anthropic_client = None
+        self._openai_client = None
+        self._select_default_backend()
+
+    def use_api_key(self) -> bool:
+        if not self._api_provider:
+            self.last_error = "no API key configured — run /key"
+            return False
+        self.use_backend(self._api_provider)
+        return True
+
+    def _get_anthropic_client(self):
+        if self._anthropic_client is None:
             import anthropic
 
-            self._client = anthropic.Anthropic()
-        return self._client
+            self._anthropic_client = anthropic.Anthropic(api_key=self._api_key)
+        return self._anthropic_client
+
+    def _get_openai_client(self):
+        if self._openai_client is None:
+            from openai import OpenAI
+
+            self._openai_client = OpenAI(api_key=self._api_key)
+        return self._openai_client
 
     def lookup(
         self,
@@ -124,7 +240,8 @@ class Enricher:
         tags: list[str] | None = None,
         hint: str | None = None,
     ) -> TrackTags | None:
-        """Ask Claude (with web search + fetch) for canonical track metadata."""
+        """Research canonical track metadata using the selected backend."""
+        self.last_error = None
         desc = (description or "").strip()
         if len(desc) > 1500:
             desc = desc[:1500] + "…"
@@ -138,16 +255,21 @@ class Enricher:
         )
         if hint:
             prompt += HINT_SUFFIX.format(hint=hint)
-        if self.backend == "subscription":
-            text = self._ask_subscription(prompt)
+        if self.backend == "codex":
+            text = self._ask_codex(prompt)
+        elif self.backend == "claude":
+            text = self._ask_claude(prompt)
+        elif self.backend == "openai_api":
+            text = self._ask_openai_api(prompt)
+        elif self.backend == "anthropic_api":
+            text = self._ask_anthropic_api(prompt)
         else:
-            text = self._ask_sdk(prompt)
+            self.last_error = "no enrichment provider — run /key or /login"
+            return None
         if text is None:
             return None
 
-        match = None
-        for match in JSON_RE.finditer(text):
-            pass  # keep the last JSON object in the reply
+        match = JSON_RE.search(text)
         if not match:
             self.last_error = "no JSON in model reply"
             return None
@@ -169,7 +291,94 @@ class Enricher:
             confidence=data.get("confidence"),
         )
 
-    def _ask_subscription(self, prompt: str) -> str | None:
+    def _ask_codex(self, prompt: str) -> str | None:
+        """Run a read-only web lookup through Codex with ChatGPT subscription auth."""
+        import tempfile
+
+        # Reuse CODEX_HOME/auth when configured, but do not inherit markers that
+        # would attach this lookup to the parent Codex/Conductor agent session.
+        keep_codex = {"CODEX_HOME", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"}
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("CODEX_") or key in keep_codex
+        }
+        try:
+            with tempfile.TemporaryDirectory(prefix="transmute-codex-") as run_dir:
+                schema_path = Path(run_dir) / "track-tags.schema.json"
+                schema_path.write_text(json.dumps(OUTPUT_SCHEMA), encoding="utf-8")
+                proc = subprocess.run(
+                    [
+                        "codex",
+                        "--search",
+                        "--ask-for-approval",
+                        "never",
+                        "--disable",
+                        "shell_tool",
+                        "exec",
+                        "--ephemeral",
+                        "--ignore-user-config",
+                        "--ignore-rules",
+                        "--sandbox",
+                        "read-only",
+                        "--skip-git-repo-check",
+                        "--cd",
+                        run_dir,
+                        "--output-schema",
+                        str(schema_path),
+                        prompt,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    cwd=run_dir,
+                    env=env,
+                    check=False,
+                )
+        except FileNotFoundError:
+            self.enabled = False
+            self.last_error = "codex CLI not found — install Codex or choose /enrich claude"
+            return None
+        except subprocess.TimeoutExpired:
+            self.last_error = "codex CLI timed out"
+            return None
+
+        if proc.returncode != 0:
+            err = self._last_error_line(proc.stderr or proc.stdout)
+            err_lower = err.lower()
+            if any(
+                marker in err_lower
+                for marker in ("log in", "logged in", "authent", "unauthorized")
+            ):
+                self.enabled = False
+                self.last_error = (
+                    "not logged in to Codex — run /login codex "
+                    "and choose your ChatGPT account"
+                )
+            else:
+                self.last_error = err[:200] or "codex CLI failed"
+            return None
+        return proc.stdout.strip()
+
+    @staticmethod
+    def _last_error_line(output: str) -> str:
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        markers = (
+            "error:",
+            "not logged in",
+            "unauthorized",
+            "authentication",
+            "rate limit",
+            "usage limit",
+            "session limit",
+            "quota",
+        )
+        for line in reversed(lines):
+            if any(marker in line.lower() for marker in markers):
+                return line
+        return lines[-1] if lines else ""
+
+    def _ask_claude(self, prompt: str) -> str | None:
         """Run the lookup through headless Claude Code (`claude -p`) on the user's subscription."""
         import tempfile
 
@@ -199,9 +408,22 @@ class Enricher:
         except subprocess.TimeoutExpired:
             self.last_error = "claude CLI timed out"
             return None
+
+        data = None
+        if proc.stdout:
+            try:
+                data = json.loads(proc.stdout)
+            except json.JSONDecodeError:
+                pass
+
         if proc.returncode != 0:
-            err = (proc.stderr or proc.stdout).strip()
-            if "log in" in err.lower() or "authent" in err.lower():
+            result = data.get("result") if isinstance(data, dict) else None
+            err = str(result or proc.stderr or proc.stdout).strip()
+            err_lower = err.lower()
+            if any(
+                marker in err_lower
+                for marker in ("log in", "logged in", "authent", "invalid api key")
+            ):
                 self.enabled = False
                 self.last_error = (
                     "not logged in to Claude — run `claude`, type /login, "
@@ -210,9 +432,8 @@ class Enricher:
             else:
                 self.last_error = err[:200] or "claude CLI failed"
             return None
-        try:
-            data = json.loads(proc.stdout)
-        except json.JSONDecodeError:
+
+        if data is None:
             self.last_error = "unparseable claude CLI output"
             return None
         if data.get("is_error"):
@@ -220,11 +441,40 @@ class Enricher:
             return None
         return data.get("result", "")
 
-    def _ask_sdk(self, prompt: str) -> str | None:
+    def _ask_openai_api(self, prompt: str) -> str | None:
+        """Run the lookup through the OpenAI Responses API."""
+        import openai
+
+        try:
+            response = self._get_openai_client().responses.create(
+                model=OPENAI_MODEL,
+                input=prompt,
+                tools=[{"type": "web_search"}],
+                reasoning={"effort": "low"},
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "track_tags",
+                        "strict": True,
+                        "schema": OUTPUT_SCHEMA,
+                    }
+                },
+                store=False,
+            )
+        except openai.AuthenticationError:
+            self.enabled = False
+            self.last_error = "invalid OpenAI API key — run /key to replace it"
+            return None
+        except Exception as e:  # noqa: BLE001
+            self.last_error = str(e)[:200]
+            return None
+        return response.output_text
+
+    def _ask_anthropic_api(self, prompt: str) -> str | None:
         """Run the lookup through the Anthropic SDK (API key / Console billing)."""
         import anthropic
 
-        client = self._get_client()
+        client = self._get_anthropic_client()
         messages = [{"role": "user", "content": prompt}]
         tools = [
             {
@@ -241,7 +491,7 @@ class Enricher:
 
         try:
             response = client.messages.create(
-                model=MODEL,
+                model=ANTHROPIC_MODEL,
                 max_tokens=4000,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "low"},
@@ -256,7 +506,7 @@ class Enricher:
                     {"role": "assistant", "content": response.content}
                 ]
                 response = client.messages.create(
-                    model=MODEL,
+                    model=ANTHROPIC_MODEL,
                     max_tokens=4000,
                     thinking={"type": "adaptive"},
                     output_config={"effort": "low"},
@@ -265,12 +515,12 @@ class Enricher:
                 )
         except anthropic.AuthenticationError:
             self.enabled = False
-            self.last_error = "no valid Anthropic API key — set ANTHROPIC_API_KEY to enable metadata enrichment"
+            self.last_error = "invalid Anthropic API key — run /key to replace it"
             return None
         except Exception as e:  # noqa: BLE001
             if "Could not resolve authentication" in str(e):
                 self.enabled = False
-                self.last_error = "no Anthropic API key found — set ANTHROPIC_API_KEY to enable metadata enrichment"
+                self.last_error = "no Anthropic API key found — run /key"
             else:
                 self.last_error = str(e)[:200]
             return None
