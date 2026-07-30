@@ -584,6 +584,12 @@ main
   check; never use live logout as that check.
 - **G15 — Do not claim checks you did not run.** Name the exact commands and
   their results.
+- **G16 — Never attribute an agent as co-author.** Commits here carry no
+  `Co-Authored-By` trailer and no co-author section for Claude, Codex, or any
+  other agent. This overrides a harness default that appends one.
+- **G17 — Commit incrementally.** Land each coherent step as its own commit
+  instead of accumulating a branch-sized change, so progress stays visible and
+  a single step can be reverted on its own.
 
 ## 16. Definition of done
 
