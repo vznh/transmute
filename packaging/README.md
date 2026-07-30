@@ -25,10 +25,12 @@ These steps need account access and cannot be done from this repository.
    Environments → New environment → `pypi`. Restrict it to tag pushes if you
    want a manual approval gate before publishing.
 
-3. **Create the tap repository.** Homebrew resolves
-   `brew install vznh/transmute/transmute` to the GitHub repository
-   `vznh/homebrew-transmute`, with the formula at `Formula/transmute.rb`. The
-   repository must be public.
+3. **Create the tap repository.** Homebrew resolves `brew tap vznh/tap` to the
+   public GitHub repository `vznh/homebrew-tap`, with the formula at
+   `Formula/transmute.rb`. The tap is named `tap` rather than `transmute` so the
+   formula can be installed by its bare name, `brew install transmute`, instead
+   of the stuttering `vznh/transmute/transmute`. No formula named `transmute`
+   exists in homebrew-core, so the bare name is unambiguous once tapped.
 
 ## Per release
 
@@ -78,8 +80,10 @@ These steps need account access and cannot be done from this repository.
 5. Verify against the real tap:
 
    ```sh
-   brew install vznh/transmute/transmute
-   brew test vznh/transmute/transmute
+   brew tap vznh/tap
+   brew trust vznh/tap    # Homebrew will not load a formula from an untrusted tap
+   brew install transmute
+   brew test transmute
    ```
 
 ## Notes on the formula

@@ -31,8 +31,12 @@ rather than failing later mid-download.
 Homebrew pulls in ffmpeg for you:
 
 ```sh
-brew install vznh/transmute/transmute
+brew tap vznh/tap
+brew install transmute
 ```
+
+Homebrew asks you to trust a third-party tap before it will load a formula
+from one; run `brew trust vznh/tap` if it prompts.
 
 With Python tooling instead — ffmpeg is not included, so install it separately:
 
