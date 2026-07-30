@@ -19,15 +19,16 @@ from typing import Literal
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.document import Document
 from prompt_toolkit.layout.dimension import Dimension
 
 from .commands import Commands
 from .config import HISTORY_FILE, MAX_WORKERS, Settings
-from .downloader import Job, download_job, extract_urls
+from .downloader import Job, download_job, extract_urls, is_supported_url
 from .enrich import Enricher, TrackTags, apply_tags
 from .keys import build_key_bindings
 from .layout import build_layout
-from .style import HELP_HINT, HISTORY_SHOWN, MESSAGES_SHOWN, STYLE, TAGLINE
+from .style import HELP_HINT, HISTORY_SHOWN, MESSAGES_SHOWN, PLACEHOLDER, STYLE, TAGLINE
 from .widgets import Modal
 
 EntryKind = Literal["info", "ok", "err", "hint"]
@@ -39,6 +40,20 @@ class Entry:
     line: str
     kind: EntryKind = "info"
     job: Job | None = None
+
+
+@dataclass
+class DirPicker:
+    """Interactive output-directory picker driven from /out (no-arg form).
+
+    The input buffer holds only the path relative to ~/ (the "~/" is a fixed,
+    uneditable prompt prefix). `stage` is "input" while a path is being typed
+    and "confirm" while asking y/n to create a folder that doesn't exist yet.
+    """
+
+    stage: str = "input"  # input | confirm
+    typed: str = ""  # relative path the create prompt is asking about
+    pending: Path | None = None  # absolute path awaiting create confirmation
 
 
 class App:
@@ -60,6 +75,7 @@ class App:
         self.queued = 0
         self.sel: int | None = None
         self.modal: Modal | None = None
+        self.dir_picker: DirPicker | None = None
         self.input_notice: tuple[str, str] | None = None
         self._input_notice_id = 0
         self._seq = 0
@@ -134,8 +150,9 @@ class App:
 
         if msgs:
             cur.append(rule)
+            cur.append(("class:subsection", "  Logs\n"))
             for style, line in msgs:
-                cur.append((style, f"  {line[:width]}\n"))
+                cur.append((style, f"    {line[:width]}\n"))
         return above, below
 
     def _render_above(self):
@@ -159,7 +176,27 @@ class App:
             parts.append(f"{queued} queued")
         return [("class:toolbar", "  " + "  ·  ".join(parts) + " ")]
 
+    def _input_prefix(self):
+        """Prompt-line prefix fragments. The picker's "~/" is rendered here
+        (not in the buffer) so it can't be edited or deleted."""
+        if self.dir_picker and self.dir_picker.stage == "input":
+            return [("class:prompt", "❯ "), ("class:accent", "~/")]
+        if self.modal:
+            return [("class:prompt", self.modal.prefix)]
+        return [("class:prompt", "❯ ")]
+
+    def _input_placeholder(self) -> str:
+        if self.dir_picker:
+            if self.dir_picker.stage == "confirm":
+                return f"~/{self.dir_picker.typed} doesn't exist — create it? (y/n)"
+            return "type a folder under home — tab to complete, enter to set"
+        if self.modal:
+            return self.modal.placeholder
+        return PLACEHOLDER
+
     def _input_hint(self):
+        if self.dir_picker is not None:
+            return [("class:input.hint", "  esc to cancel output directory change")]
         with self.lock:
             notice = self.input_notice
             actionable = any(e.kind in ("err", "hint") for e in self.history)
@@ -292,9 +329,79 @@ class App:
                 self.sel = self.sel - 1 if self.sel > idx else None
         self.refresh()
 
-    def open_modal(self, modal: Modal) -> None:
-        from prompt_toolkit.document import Document
+    # ── output-directory picker ─────────────────────────────────────────
 
+    def open_dir_picker(self) -> None:
+        with self.lock:
+            self.dir_picker = DirPicker()
+            self.sel = None
+        self.input_buffer.reset()
+        self._update_focus()
+        self.refresh()
+
+    def close_dir_picker(self) -> None:
+        with self.lock:
+            self.dir_picker = None
+        self.input_buffer.reset()
+        self.refresh()
+
+    def _apply_out_dir(self, path: Path) -> None:
+        self.set_out_dir(path)
+        self.msg("class:dim", f"output directory: {path}")
+
+    def _accept_dir(self, buff: Buffer) -> None:
+        """Enter in the path stage: use the folder if it exists, else offer to
+        create it."""
+        picker = self.dir_picker
+        if picker is None or picker.stage != "input":
+            return
+        rel = buff.text.strip().lstrip("/")
+        target = Path.home() / rel if rel else Path.home()
+        if target.is_dir():
+            self._apply_out_dir(target)
+            self.close_dir_picker()
+            return
+        picker.stage = "confirm"
+        picker.typed = rel
+        picker.pending = target
+        buff.reset()  # cleared while we ask y/n
+        self.refresh()
+
+    def _dir_confirm_create(self) -> None:
+        """y in the confirm stage: make the folder, adopt it, and exit."""
+        picker = self.dir_picker
+        if picker is None or picker.pending is None:
+            return
+        target = picker.pending
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self.msg("class:err", f"can't create {target}: {e}")
+            picker.stage = "input"
+            picker.pending = None
+            self.input_buffer.set_document(
+                Document(picker.typed, len(picker.typed)), bypass_readonly=True
+            )
+            self.refresh()
+            return
+        self.msg("class:ok", f"created {target}")
+        self._apply_out_dir(target)
+        self.close_dir_picker()
+
+    def _dir_decline_create(self) -> None:
+        """n in the confirm stage: return to the path input, restoring the text."""
+        picker = self.dir_picker
+        if picker is None:
+            return
+        rel = picker.typed
+        picker.stage = "input"
+        picker.pending = None
+        self.input_buffer.set_document(
+            Document(rel, len(rel)), bypass_readonly=True
+        )
+        self.refresh()
+
+    def open_modal(self, modal: Modal) -> None:
         with self.lock:
             self.modal = modal
         self.input_buffer.set_document(
@@ -339,11 +446,20 @@ class App:
         with self.lock:
             if not any(existing is job for existing in self.failed):
                 self.failed.append(job)
+        if job.retryable:
+            line = (
+                f"✘ {job.url[:44]}  {job.error or 'unknown error'}"
+                " — ↑ + enter to retry"
+            )
+            kind: EntryKind = "err"
+        else:
+            line = f"✘ {job.url[:44]}  {job.error or 'unknown error'}"
+            kind = "info"
         self.add_entry(
             Entry(
                 "class:err",
-                f"✘ {job.url[:44]}  {job.error or 'unknown error'} — ↑ + enter to retry",
-                "err",
+                line,
+                kind,
                 job,
             )
         )
@@ -483,6 +599,9 @@ class App:
     # ── input handling ──────────────────────────────────────────────────
 
     def _accept(self, buff: Buffer) -> bool:
+        if self.dir_picker:
+            self._accept_dir(buff)
+            return False
         if self.modal:
             modal = self.modal
             text = buff.text.strip()
@@ -506,7 +625,23 @@ class App:
                 "class:dim", "that doesn't look like a link — paste a URL or type /help"
             )
             return False
-        self.submit_urls(urls)
+        # Gate on source: only hosts yt-dlp can extract audio from. To accept a
+        # new media source, extend SUPPORTED_HOSTS in downloader.py — not here.
+        supported = [u for u in urls if is_supported_url(u)]
+        if not supported:
+            self.msg(
+                "class:err", "only YouTube and SoundCloud links are supported"
+            )
+            return False
+        rejected = len(urls) - len(supported)
+        if rejected:
+            self.msg(
+                "class:warn",
+                f"ignored {rejected} unsupported "
+                f"link{'s' if rejected != 1 else ''} — "
+                "only YouTube and SoundCloud are supported",
+            )
+        self.submit_urls(supported)
         return False  # False → clear the input line (and append to history)
 
     def _accept_hint(self, buff: Buffer) -> bool:
