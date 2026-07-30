@@ -1,5 +1,0 @@
-modal
-fastapi
-uvicorn[standard]
-pydantic
-yt-dlp
