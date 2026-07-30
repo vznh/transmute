@@ -150,7 +150,7 @@ main
 
 Entry point
 
-- `transmute/main.py` — process startup and wiring
+- `transmute/main.py` — process startup, `--version`/`--help`, and wiring
 - `transmute/__main__.py` — supports `python -m transmute`
 
 Core
@@ -175,6 +175,7 @@ Services
 
 Tests
 
+- `tests/test_main.py` — entry-point argument handling
 - `tests/test_app.py` — selection, retry, modal, queue, and notice state
 - `tests/test_downloader.py` — URL parsing, yt-dlp options, and error classification
 - `tests/test_enrich.py` — credentials, provider calls, tagging, and renaming
