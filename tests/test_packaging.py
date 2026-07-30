@@ -65,6 +65,20 @@ def test_binary_only_packages_are_detected(generator, closure):
     assert compiled == {"jiter", "pydantic-core"}
 
 
+def test_github_tarball_url_uses_the_v_prefixed_tag(generator):
+    # The release workflow tags v<version>; the formula must ask for the same ref.
+    assert generator.github_tarball_url("1.2.3").endswith("/refs/tags/v1.2.3.tar.gz")
+
+
+def test_explicit_source_is_used_verbatim(generator, closure):
+    formula = generator.render_formula(
+        "1.2.3", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
+    )
+
+    assert 'url "https://example.invalid/src.tar.gz"' in formula
+    assert f'sha256 "{"a" * 64}"' in formula
+
+
 def test_rendered_formula_declares_ffmpeg_and_every_resource(generator, closure):
     formula = generator.render_formula("9.9.9", "https://example.invalid/x.tar.gz", "0" * 64, list(closure.values()))
 

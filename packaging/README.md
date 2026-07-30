@@ -57,6 +57,16 @@ These steps need account access and cannot be done from this repository.
    Without a matching PyPI release the generator warns and writes placeholder
    `url` and `sha256` fields, which Homebrew will reject.
 
+   The tap does not have to wait for PyPI. A pushed tag is enough on its own,
+   because GitHub serves a source tarball for it:
+
+   ```sh
+   uv run python packaging/homebrew/generate_formula.py --source github --write
+   ```
+
+   Both sources build the same package; PyPI is preferred once the project
+   exists because its sdist is the artifact the release workflow verified.
+
 4. Copy `packaging/homebrew/transmute.rb` to `Formula/transmute.rb` in the tap
    repository and push.
 

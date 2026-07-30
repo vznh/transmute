@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -126,6 +127,32 @@ def needs_compiler(package: dict[str, Any]) -> bool:
     return bool(wheels) and not any("-none-any.whl" in wheel["url"] for wheel in wheels)
 
 
+def fetch_sha256(url: str) -> str | None:
+    digest = hashlib.sha256()
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            for chunk in iter(lambda: response.read(1 << 16), b""):
+                digest.update(chunk)
+    except (urllib.error.URLError, TimeoutError):
+        return None
+    return digest.hexdigest()
+
+
+def github_tarball_url(version: str) -> str:
+    """The source tarball GitHub generates for a release tag.
+
+    This lets the tap ship before the PyPI project exists, since a tag is all
+    Homebrew needs to fetch and verify a source archive.
+    """
+    return f"https://github.com/vznh/transmute/archive/refs/tags/v{version}.tar.gz"
+
+
+def github_tarball(version: str) -> tuple[str, str] | None:
+    url = github_tarball_url(version)
+    sha256 = fetch_sha256(url)
+    return None if sha256 is None else (url, sha256)
+
+
 def fetch_pypi_sdist(version: str) -> tuple[str, str] | None:
     url = f"https://pypi.org/pypi/transmute-cli/{version}/json"
     try:
@@ -193,8 +220,14 @@ end
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", default=None, help="defaults to transmute.__version__")
-    parser.add_argument("--url", default=None, help="sdist URL; defaults to the PyPI release")
-    parser.add_argument("--sha256", default=None, help="sdist sha256; defaults to the PyPI release")
+    parser.add_argument(
+        "--source",
+        choices=("pypi", "github"),
+        default="pypi",
+        help="where the formula downloads Transmute itself from (default: pypi)",
+    )
+    parser.add_argument("--url", default=None, help="source URL; overrides --source")
+    parser.add_argument("--sha256", default=None, help="source sha256; overrides --source")
     parser.add_argument("--write", action="store_true", help=f"write to {FORMULA_PATH.name}")
     args = parser.parse_args(argv)
 
@@ -205,11 +238,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.url and args.sha256:
             url, sha256 = args.url, args.sha256
         else:
-            released = fetch_pypi_sdist(version)
+            if args.source == "github":
+                released = github_tarball(version)
+                missing = f"no GitHub release tarball for tag v{version}"
+            else:
+                released = fetch_pypi_sdist(version)
+                missing = f"transmute-cli {version} is not on PyPI yet"
             if released is None:
                 print(
-                    f"warning: transmute-cli {version} is not on PyPI yet; "
-                    "the url and sha256 fields are placeholders",
+                    f"warning: {missing}; the url and sha256 fields are placeholders",
                     file=sys.stderr,
                 )
                 url = f"https://pypi.org/project/transmute-cli/{version}/#PENDING-RELEASE"
