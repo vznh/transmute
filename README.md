@@ -10,7 +10,9 @@ You can do any of the two options:
 - Bring your own API key (only Codex, Claude supported for now)
 2. Provide a correct URL
   
-We support only https://[youtube.com, soundcloud.com] links.  
+We support `youtube.com`, `youtu.be`, and `soundcloud.com` links, including
+subdomains like `music.youtube.com`. Anything else is turned away as you paste it,
+rather than failing later mid-download.
 
 3. Ensure you output to the right directory using `/out`
 
@@ -44,12 +46,25 @@ live at the bottom, so keep pasting while earlier tracks convert. A status bar b
 the prompt shows the output dir, bitrate, and active/queued work. MP3s are written
 at 320kbps with embedded metadata and cover art, to `~/Downloads` by default.
 
+Unsupported links are rejected as you paste them; if a paste mixes supported and
+unsupported links, the supported ones are queued and the rest are reported as
+ignored. When a download does fail, the reason is summarized in a line you can act
+on — `ffmpeg missing — brew install ffmpeg`, `requires login — needs browser
+cookies`, `not available in your region`. Failures that retrying cannot fix, like a
+private or removed video, are marked non-retryable and left out of `/retry`.
+
 ## History and persistence
 
 Prompt recall and structured download activity persist locally across restarts.
 Recent completed and failed tracks are restored when Transmute opens; restored
 failures can be retried and restored low-confidence entries can receive hints just
 like entries from the current session. `/list` includes recent persisted tracks.
+
+If Transmute is killed mid-download, the next launch notices the interrupted
+session and turns whatever was still in flight into a retryable failure
+(`interrupted — retry when ready`) instead of losing it. Several instances can run
+at once against the same storage: a retry or a hint is claimed by exactly one of
+them, and starting one does not disturb work already running in another.
 
 Your output directory and bitrate also persist. `/out` and `/quality` are saved to
 `~/.transmute/settings.json` and restored on the next launch. A runtime command in
