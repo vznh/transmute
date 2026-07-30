@@ -1,4 +1,5 @@
 """Metadata enrichment: Claude + web search → proper ID3 tags."""
+
 from __future__ import annotations
 
 import json
@@ -81,8 +82,8 @@ class TrackTags:
     album_artist: str | None = None
     year: str | None = None
     genre: str | None = None
-    kind: str | None = None        # original | reupload | derivative
-    based_on: str | None = None    # for derivatives: the source artist/song
+    kind: str | None = None  # original | reupload | derivative
+    based_on: str | None = None  # for derivatives: the source artist/song
     confidence: str | None = None  # high | medium | low (artist attribution)
 
 
@@ -113,8 +114,14 @@ class Enricher:
         return self._client
 
     def lookup(
-        self, *, title: str, uploader: str | None, duration: int | None, url: str,
-        description: str | None = None, tags: list[str] | None = None,
+        self,
+        *,
+        title: str,
+        uploader: str | None,
+        duration: int | None,
+        url: str,
+        description: str | None = None,
+        tags: list[str] | None = None,
         hint: str | None = None,
     ) -> TrackTags | None:
         """Ask Claude (with web search + fetch) for canonical track metadata."""
@@ -122,8 +129,10 @@ class Enricher:
         if len(desc) > 1500:
             desc = desc[:1500] + "…"
         prompt = PROMPT.format(
-            title=title, uploader=uploader or "unknown",
-            duration=duration or "unknown", url=url,
+            title=title,
+            uploader=uploader or "unknown",
+            duration=duration or "unknown",
+            url=url,
             page_tags=", ".join(tags) if tags else "none",
             description=desc or "(none)",
         )
@@ -170,9 +179,22 @@ class Enricher:
         env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
         try:
             proc = subprocess.run(
-                ["claude", "-p", "--output-format", "json", "--allowedTools", "WebSearch", "WebFetch"],
-                input=prompt, capture_output=True, text=True, timeout=300,
-                cwd=tempfile.gettempdir(), env=env,
+                [
+                    "claude",
+                    "-p",
+                    "--output-format",
+                    "json",
+                    "--allowedTools",
+                    "WebSearch",
+                    "WebFetch",
+                ],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=tempfile.gettempdir(),
+                env=env,
+                check=False,
             )
         except subprocess.TimeoutExpired:
             self.last_error = "claude CLI timed out"
@@ -205,8 +227,16 @@ class Enricher:
         client = self._get_client()
         messages = [{"role": "user", "content": prompt}]
         tools = [
-            {"type": "web_search_20260209", "name": "web_search", "max_uses": MAX_SEARCHES},
-            {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": MAX_SEARCHES},
+            {
+                "type": "web_search_20260209",
+                "name": "web_search",
+                "max_uses": MAX_SEARCHES,
+            },
+            {
+                "type": "web_fetch_20260209",
+                "name": "web_fetch",
+                "max_uses": MAX_SEARCHES,
+            },
         ]
 
         try:
@@ -222,7 +252,9 @@ class Enricher:
             for _ in range(MAX_CONTINUATIONS):
                 if response.stop_reason != "pause_turn":
                     break
-                messages = messages + [{"role": "assistant", "content": response.content}]
+                messages = messages + [
+                    {"role": "assistant", "content": response.content}
+                ]
                 response = client.messages.create(
                     model=MODEL,
                     max_tokens=4000,
@@ -233,16 +265,12 @@ class Enricher:
                 )
         except anthropic.AuthenticationError:
             self.enabled = False
-            self.last_error = (
-                "no valid Anthropic API key — set ANTHROPIC_API_KEY to enable metadata enrichment"
-            )
+            self.last_error = "no valid Anthropic API key — set ANTHROPIC_API_KEY to enable metadata enrichment"
             return None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if "Could not resolve authentication" in str(e):
                 self.enabled = False
-                self.last_error = (
-                    "no Anthropic API key found — set ANTHROPIC_API_KEY to enable metadata enrichment"
-                )
+                self.last_error = "no Anthropic API key found — set ANTHROPIC_API_KEY to enable metadata enrichment"
             else:
                 self.last_error = str(e)[:200]
             return None
@@ -284,7 +312,9 @@ def apply_tags(path: Path, tags: TrackTags) -> Path:
     audio.save()
 
     if tags.artist and tags.title:
-        new_path = path.with_name(_safe_filename(f"{tags.artist} - {tags.title}") + ".mp3")
+        new_path = path.with_name(
+            _safe_filename(f"{tags.artist} - {tags.title}") + ".mp3"
+        )
         if new_path != path and not new_path.exists():
             path.rename(new_path)
             return new_path

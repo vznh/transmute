@@ -11,7 +11,13 @@ dependencies = [
 ]
 
 [project.scripts]
-transmute = "transmute.app:main"
+transmute = "transmute.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+]
 
 [build-system]
 requires = ["hatchling"]
