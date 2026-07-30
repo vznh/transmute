@@ -503,7 +503,7 @@ class App:
         if tags.kind == "derivative" and tags.based_on:
             parts.append(f"derivative of {tags.based_on}")
         detail = f"  ({' · '.join(parts)})" if parts else ""
-        return f"{tags.artist} — {tags.title}{detail}"
+        return f"{tags.title}{detail}"
 
     # ── input handling ──────────────────────────────────────────────────
 
