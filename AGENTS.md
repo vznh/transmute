@@ -548,6 +548,10 @@ main
   or documented environment variables.
 - **DEP12 — Keep worktree behavior independent.** Commands and tests must run
   from any Conductor workspace without relying on the original root checkout.
+- **DEP13 — Resolve persisted settings in one order.** Output directory and
+  bitrate resolve as runtime command → `~/.transmute/settings.json` → built-in
+  defaults. An unreadable or schema-incompatible settings file falls back to
+  defaults with a bounded warning and is never overwritten implicitly.
 
 ## 15. Change and review discipline
 

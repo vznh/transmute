@@ -8,6 +8,8 @@ from pathlib import Path
 STATE_DIR = Path.home() / ".transmute"
 HISTORY_FILE = STATE_DIR / "history"
 ACTIVITY_FILE = STATE_DIR / "activity.sqlite3"
+SETTINGS_FILE = STATE_DIR / "settings.json"
+SETTINGS_VERSION = 1
 QUALITIES = ("128", "192", "256", "320")
 MAX_WORKERS = 4
 

@@ -23,12 +23,20 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.layout.dimension import Dimension
 
 from .commands import HELP_ROWS, Commands
-from .config import ACTIVITY_FILE, HISTORY_FILE, MAX_WORKERS, STATE_DIR, Settings
+from .config import (
+    ACTIVITY_FILE,
+    HISTORY_FILE,
+    MAX_WORKERS,
+    SETTINGS_FILE,
+    STATE_DIR,
+    Settings,
+)
 from .downloader import Job, download_job, extract_urls, is_supported_url
 from .enrich import Enricher, TrackTags, apply_tags
 from .history import ActivityStore, HistoryStoreError, StoredJob
 from .keys import build_key_bindings
 from .layout import build_layout
+from .settings import SettingsStore, SettingsStoreError
 from .style import HELP_HINT, HISTORY_SHOWN, MESSAGES_SHOWN, PLACEHOLDER, STYLE, TAGLINE
 from .widgets import Modal
 
@@ -65,8 +73,8 @@ class App:
         history_file: Path = HISTORY_FILE,
         pool: Executor | None = None,
         activity_store: ActivityStore | None = None,
+        settings_store: SettingsStore | None = None,
     ) -> None:
-        self.settings = Settings()
         self.enricher = Enricher()
         self.completed: list[Job] = []
         self.failed: list[Job] = []
@@ -79,6 +87,10 @@ class App:
         self.session_id = ""
         self._run_outcomes: dict[str, str] = {}
         self._persistence_warning_shown = False
+        self.settings_store = (
+            settings_store if settings_store is not None else SettingsStore(SETTINGS_FILE)
+        )
+        self.settings = self._load_settings()
         self.active: dict[int, str] = {}
         self.queued = 0
         self.sel: int | None = None
@@ -177,6 +189,23 @@ class App:
             self.activity_store = None
             self._warn_persistence(exc)
             return None
+
+    def _load_settings(self) -> Settings:
+        """Restore saved settings, falling back to defaults if the file is bad."""
+        try:
+            return self.settings_store.load()
+        except SettingsStoreError as exc:
+            self.msg("class:warn", f"⚠ saved settings ignored: {str(exc)[:100]}")
+            return Settings()
+
+    def _persist_settings(self) -> None:
+        """Write the current settings; a failure warns but is not fatal."""
+        with self.lock:
+            settings = self.settings
+        try:
+            self.settings_store.save(settings)
+        except SettingsStoreError as exc:
+            self.msg("class:warn", f"⚠ couldn't save settings: {str(exc)[:100]}")
 
     # ── rendering ───────────────────────────────────────────────────────
 
@@ -377,11 +406,13 @@ class App:
     def set_out_dir(self, out_dir: Path) -> None:
         with self.lock:
             self.settings = replace(self.settings, out_dir=out_dir)
+        self._persist_settings()
         self.refresh()
 
     def set_quality(self, quality: str) -> None:
         with self.lock:
             self.settings = replace(self.settings, quality=quality)
+        self._persist_settings()
         self.refresh()
 
     def clear_selection(self) -> None:

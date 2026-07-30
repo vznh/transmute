@@ -21,6 +21,7 @@ from transmute.config import Settings
 from transmute.downloader import Job
 from transmute.enrich import TrackTags
 from transmute.history import ActivityStore, HistoryStoreError
+from transmute.settings import SettingsStore
 
 
 class RecordingPool:
@@ -41,6 +42,7 @@ def app(monkeypatch, tmp_path):
     return App(
         activity_store=ActivityStore(tmp_path / "activity.sqlite3"),
         history_file=tmp_path / "input-history",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
 
@@ -185,6 +187,7 @@ def test_activity_restores_as_actionable_jobs_across_app_instances(tmp_path):
     restored = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
 
@@ -209,6 +212,7 @@ def test_clear_stays_cleared_but_keeps_in_flight_jobs(tmp_path):
     first = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history-1",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
 
@@ -231,6 +235,7 @@ def test_clear_stays_cleared_but_keeps_in_flight_jobs(tmp_path):
     reopened = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history-2",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
     assert [job.title for job in reopened.completed] == ["New"]
@@ -269,6 +274,7 @@ def test_missing_file_does_not_restore_actionable_hint(tmp_path):
     restored = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
 
@@ -299,6 +305,7 @@ def test_hint_claimed_by_another_session_is_not_restored_as_actionable(tmp_path)
     observer = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
 
@@ -322,6 +329,7 @@ def test_restored_activity_does_not_affect_current_run_summary(
     restored = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
     monkeypatch.setattr(restored.app, "run", Mock())
@@ -375,11 +383,13 @@ def test_two_apps_cannot_both_retry_the_same_failure(tmp_path):
     first = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history-1",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
     second = App(
         activity_store=ActivityStore(db),
         history_file=tmp_path / "prompt-history-2",
+        settings_store=SettingsStore(tmp_path / "settings.json"),
         pool=RecordingPool(),
     )
     first.sel = first._actionable()[0]
@@ -475,6 +485,49 @@ def test_out_picker_escape_cancels_without_changing_dir(app):
     app.close_dir_picker()  # esc
     assert app.dir_picker is None and app.input_buffer.text == ""
     assert app.settings.out_dir == before
+
+
+def test_settings_persist_across_app_instances(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    settings_file = tmp_path / "settings.json"
+    out_dir = tmp_path / "Music"
+    out_dir.mkdir()
+
+    first = App(
+        activity_store=ActivityStore(tmp_path / "activity.sqlite3"),
+        history_file=tmp_path / "prompt-history-1",
+        settings_store=SettingsStore(settings_file),
+        pool=RecordingPool(),
+    )
+    first.set_out_dir(out_dir)
+    first.set_quality("192")
+
+    reopened = App(
+        activity_store=ActivityStore(tmp_path / "activity.sqlite3"),
+        history_file=tmp_path / "prompt-history-2",
+        settings_store=SettingsStore(settings_file),
+        pool=RecordingPool(),
+    )
+    assert reopened.settings.out_dir == out_dir
+    assert reopened.settings.quality == "192"
+
+
+def test_corrupt_settings_fall_back_to_defaults_with_warning(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text("{ not json", encoding="utf-8")
+
+    app = App(
+        activity_store=ActivityStore(tmp_path / "activity.sqlite3"),
+        history_file=tmp_path / "prompt-history",
+        settings_store=SettingsStore(settings_file),
+        pool=RecordingPool(),
+    )
+
+    assert app.settings == Settings()
+    assert any("saved settings ignored" in line for _, line in app.messages)
 
 
 def test_help_opens_takeover_with_full_command_reference(app):
