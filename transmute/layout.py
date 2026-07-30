@@ -34,7 +34,7 @@ def build_layout(app) -> Layout:
             ],
         ),
         height=1,
-        get_line_prefix=lambda line_no, wrap_count: [
+        get_line_prefix=lambda _line_no, _wrap_count: [
             ("class:prompt", app.modal.prefix if app.modal else "❯ ")
         ],
     )
@@ -44,7 +44,7 @@ def build_layout(app) -> Layout:
             input_processors=[PlaceholderProcessor(HINT_PLACEHOLDER)],
         ),
         height=1,
-        get_line_prefix=lambda line_no, wrap_count: [("class:prompt", "      ↳ ")],
+        get_line_prefix=lambda _line_no, _wrap_count: [("class:prompt", "      ↳ ")],
     )
 
     root = HSplit(

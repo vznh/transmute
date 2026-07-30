@@ -322,14 +322,15 @@ class App:
             if job.status != "done":
                 with self.lock:
                     self.failed.append(job)
-                self.add_entry(
-                    Entry(
-                        "class:err",
-                        f"✘ {job.url[:44]}  {job.error or 'unknown error'} — ↑ + enter to retry",
-                        "err",
-                        job,
-                    )
-                )
+                # Only retryable failures become selectable "err" entries;
+                # retrying an unsupported site or deleted video can't succeed.
+                if job.retryable:
+                    line = f"✘ {job.url[:44]}  {job.error or 'unknown error'} — ↑ + enter to retry"
+                    kind = "err"
+                else:
+                    line = f"✘ {job.url[:44]}  {job.error or 'unknown error'}"
+                    kind = "info"
+                self.add_entry(Entry("class:err", line, kind, job))
                 return
 
             desc = tags = None
@@ -414,6 +415,8 @@ class App:
             return False
         if text.startswith("/"):
             self.commands.dispatch(text)
+            if text.split(maxsplit=1)[0].lower() == "/key":
+                buff.text = "/key"  # never append a pasted key to command history
             return False
 
         urls = extract_urls(text)
