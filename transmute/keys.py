@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import time
 
 from prompt_toolkit.filters import Condition, has_focus
@@ -10,7 +9,7 @@ from prompt_toolkit.key_binding import KeyBindings
 
 
 def _exit_shortcut() -> str:
-    return "CMD + C" if sys.platform == "darwin" else "CTRL + C"
+    return "Ctrl+C"
 
 
 def build_key_bindings(app) -> KeyBindings:
