@@ -12,8 +12,10 @@ from __future__ import annotations
 import shutil
 import threading
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from concurrent.futures import Executor, ThreadPoolExecutor
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Literal
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -28,36 +30,43 @@ from .layout import build_layout
 from .style import HELP_HINT, HISTORY_SHOWN, MESSAGES_SHOWN, STYLE, TAGLINE
 from .widgets import Modal
 
+EntryKind = Literal["info", "ok", "err", "hint"]
+
 
 @dataclass
 class Entry:
     style: str
     line: str
-    kind: str = "info"  # info | ok | err | hint
+    kind: EntryKind = "info"
     job: Job | None = None
 
 
 class App:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        history_file: Path = HISTORY_FILE,
+        pool: Executor | None = None,
+    ) -> None:
         self.settings = Settings()
         self.enricher = Enricher()
         self.completed: list[Job] = []
         self.failed: list[Job] = []
         self.history: list[Entry] = []
         self.messages: deque[tuple[str, str]] = deque(maxlen=MESSAGES_SHOWN)
-        self.pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+        self.pool = pool or ThreadPoolExecutor(max_workers=MAX_WORKERS)
         self.lock = threading.Lock()
-        self.active: dict[int, str] = {}  # seq -> live status line
+        self.active: dict[int, str] = {}
         self.queued = 0
-        self.sel: int | None = None  # selected history index (actionable entries only)
+        self.sel: int | None = None
         self.modal: Modal | None = None
         self.input_notice: tuple[str, str] | None = None
         self._input_notice_id = 0
         self._seq = 0
         self._last_ctrl_c = 0.0
-        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        history_file.parent.mkdir(parents=True, exist_ok=True)
         self.commands = Commands(self)
-        layout = build_layout(self)  # creates input_buffer / hint_buffer on self
+        layout = build_layout(self, history_file)
         self.app = Application(
             layout=layout,
             key_bindings=build_key_bindings(self),
@@ -89,8 +98,8 @@ class App:
             active = list(self.active.values())
             queued = self.queued
             hist = list(self.history)
-        msgs = list(self.messages)
-        sel = self.sel
+            msgs = list(self.messages)
+            sel = self.sel
         cols = self._cols()
         width = max(cols - 8, 20)
         rule = ("class:rule", "  " + "─" * max(cols - 4, 10) + "\n")
@@ -142,7 +151,8 @@ class App:
         with self.lock:
             active = len(self.active)
             queued = self.queued
-        parts = [str(self.settings.out_dir), f"{self.settings.quality}k"]
+            settings = self.settings
+        parts = [str(settings.out_dir), f"{settings.quality}k"]
         if active:
             parts.append(f"{active} active")
         if queued:
@@ -153,10 +163,11 @@ class App:
         with self.lock:
             notice = self.input_notice
             actionable = any(e.kind in ("err", "hint") for e in self.history)
+            modal = self.modal
         if notice:
             style, text = notice
-        elif self.modal:
-            style, text = "class:input.hint", self.modal.hint
+        elif modal:
+            style, text = "class:input.hint", modal.hint
         elif actionable:
             style, text = (
                 "class:input.hint",
@@ -178,20 +189,24 @@ class App:
                 return None
             return self.history[self.sel].kind
 
+    def has_selection(self) -> bool:
+        with self.lock:
+            return self.sel is not None
+
     def _move_sel(self, delta: int) -> None:
-        acts = self._actionable()
-        if not acts:
-            self.sel = None
-        elif self.sel is None:
-            if delta < 0:
-                self.sel = acts[-1]
-        else:
-            pos = acts.index(self.sel) if self.sel in acts else len(acts) - 1
-            pos += delta
-            if pos >= len(acts):
-                self.sel = None  # down past the newest → back to plain input
+        with self.lock:
+            acts = [
+                i for i, entry in enumerate(self.history) if entry.kind in ("err", "hint")
+            ]
+            if not acts:
+                self.sel = None
+            elif self.sel is None:
+                if delta < 0:
+                    self.sel = acts[-1]
             else:
-                self.sel = acts[max(pos, 0)]
+                pos = acts.index(self.sel) if self.sel in acts else len(acts) - 1
+                pos += delta
+                self.sel = None if pos >= len(acts) else acts[max(pos, 0)]
         self._update_focus()
         self.refresh()
 
@@ -210,7 +225,29 @@ class App:
             self.app.invalidate()
 
     def msg(self, style: str, line: str) -> None:
-        self.messages.append((style, line))
+        with self.lock:
+            self.messages.append((style, line))
+        self.refresh()
+
+    def settings_snapshot(self) -> Settings:
+        with self.lock:
+            return self.settings
+
+    def set_out_dir(self, out_dir: Path) -> None:
+        with self.lock:
+            self.settings = replace(self.settings, out_dir=out_dir)
+        self.refresh()
+
+    def set_quality(self, quality: str) -> None:
+        with self.lock:
+            self.settings = replace(self.settings, quality=quality)
+        self.refresh()
+
+    def clear_selection(self) -> None:
+        with self.lock:
+            self.sel = None
+        self.hint_buffer.reset()
+        self._update_focus()
         self.refresh()
 
     def show_input_notice(
@@ -258,14 +295,16 @@ class App:
     def open_modal(self, modal: Modal) -> None:
         from prompt_toolkit.document import Document
 
-        self.modal = modal
+        with self.lock:
+            self.modal = modal
         self.input_buffer.set_document(
             Document(modal.initial, len(modal.initial)), bypass_readonly=True
         )
         self.refresh()
 
     def close_modal(self) -> None:
-        self.modal = None
+        with self.lock:
+            self.modal = None
         self.input_buffer.reset()
         self.refresh()
 
@@ -296,14 +335,33 @@ class App:
             Entry("class:warn", f"⚠ “{(job.title or '')[:40]}” — {tail}", "hint", job)
         )
 
+    def _note_failed(self, job: Job) -> None:
+        with self.lock:
+            if not any(existing is job for existing in self.failed):
+                self.failed.append(job)
+        self.add_entry(
+            Entry(
+                "class:err",
+                f"✘ {job.url[:44]}  {job.error or 'unknown error'} — ↑ + enter to retry",
+                "err",
+                job,
+            )
+        )
+
+    def _record_completed(self, job: Job) -> None:
+        with self.lock:
+            if not any(existing is job for existing in self.completed):
+                self.completed.append(job)
+
     def submit_urls(self, urls: list[str]) -> None:
         with self.lock:
             self.queued += len(urls)
+            settings = self.settings
         self.refresh()
         for url in urls:
-            self.pool.submit(self._process, url)
+            self.pool.submit(self._process, url, settings)
 
-    def _process(self, url: str) -> None:
+    def _process(self, url: str, settings: Settings) -> None:
         with self.lock:
             self._seq += 1
             seq = self._seq
@@ -318,18 +376,9 @@ class App:
             self._set_active(seq, phase + name)
 
         try:
-            download_job(job, self.settings, on_progress)
+            download_job(job, settings, on_progress)
             if job.status != "done":
-                with self.lock:
-                    self.failed.append(job)
-                self.add_entry(
-                    Entry(
-                        "class:err",
-                        f"✘ {job.url[:44]}  {job.error or 'unknown error'} — ↑ + enter to retry",
-                        "err",
-                        job,
-                    )
-                )
+                self._note_failed(job)
                 return
 
             desc = tags = None
@@ -337,45 +386,73 @@ class App:
                 self._set_active(seq, f"enriching  {(job.title or '')[:44]}")
                 desc, tags = self._enrich(job)
 
-            with self.lock:
-                self.completed.append(job)
+            self._record_completed(job)
             self._note_done(job, desc)
             if tags is not None and tags.confidence == "low":
                 self._note_low_confidence(job)
+        except Exception as error:  # noqa: BLE001
+            message = self._error_line(error)
+            if job.status == "done":
+                self.msg("class:warn", f"⚠ post-processing skipped: {message}")
+                self._record_completed(job)
+                self._note_done(job, None)
+            else:
+                job.status = "error"
+                job.error = message
+                self._note_failed(job)
         finally:
             with self.lock:
                 self.active.pop(seq, None)
             self.refresh()
 
-    def _enrich(self, job: Job, hint: str | None = None):
-        tags = self.enricher.lookup(
-            title=job.title or "",
-            uploader=job.uploader,
-            duration=job.duration,
-            url=job.url,
-            description=job.description,
-            tags=job.tags,
-            hint=hint,
-        )
-        if not tags or not job.path:
-            if self.enricher.last_error:
-                self.msg(
-                    "class:warn", f"⚠ enrichment skipped: {self.enricher.last_error}"
-                )
+    def _enrich(
+        self,
+        job: Job,
+        hint: str | None = None,
+        *,
+        failure_label: str = "enrichment skipped",
+    ) -> tuple[str | None, TrackTags | None]:
+        try:
+            tags = self.enricher.lookup(
+                title=job.title or "",
+                uploader=job.uploader,
+                duration=job.duration,
+                url=job.url,
+                description=job.description,
+                tags=job.tags,
+                hint=hint,
+            )
+        except Exception as error:  # noqa: BLE001
+            self.msg(
+                "class:warn",
+                f"⚠ {failure_label}: {self._error_line(error)}",
+            )
             return None, None
-        job.path = apply_tags(job.path, tags)
+        if not tags or not job.path:
+            error = self.enricher.last_error
+            if not job.path and not error:
+                error = "download output path unavailable"
+            if error:
+                self.msg("class:warn", f"⚠ {failure_label}: {error}")
+            return None, None
+        try:
+            job.path = apply_tags(job.path, tags)
+        except Exception as error:  # noqa: BLE001
+            self.msg(
+                "class:warn",
+                f"⚠ tagging skipped: {self._error_line(error)}",
+            )
+            return None, None
         job.title = tags.title or job.title
         return self._describe(tags), tags
 
     def _rehint(self, job: Job, hint: str, placeholder: Entry) -> None:
-        desc, tags = self._enrich(job, hint=hint)
+        desc, tags = self._enrich(job, hint=hint, failure_label="retry failed")
         self._remove_entry(placeholder)
         if desc:
             self._note_done(job, desc)
             if tags is not None and tags.confidence == "low":
                 self._note_low_confidence(job, again=True)
-        else:
-            self.msg("class:warn", f"⚠ retry failed: {self.enricher.last_error}")
 
     def _retry_selected(self) -> None:
         with self.lock:
@@ -397,6 +474,11 @@ class App:
             parts.append(f"derivative of {tags.based_on}")
         detail = f"  ({' · '.join(parts)})" if parts else ""
         return f"{tags.artist} — {tags.title}{detail}"
+
+    @staticmethod
+    def _error_line(error: Exception) -> str:
+        lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+        return (lines[0] if lines else error.__class__.__name__)[:200]
 
     # ── input handling ──────────────────────────────────────────────────
 
@@ -461,17 +543,17 @@ class App:
         except (EOFError, KeyboardInterrupt):
             pass  # non-tty input ends with EOF; treat as a normal quit
 
-        # Back in the normal terminal: drain any in-flight work.
         with self.lock:
             busy = len(self.active) + self.queued
         if busy:
             print(
                 f"finishing {busy} job{'s' if busy != 1 else ''}… (ctrl-c to abandon)"
             )
-            try:
-                self.pool.shutdown(wait=True)
-            except KeyboardInterrupt:
-                pass
+        try:
+            self.pool.shutdown(wait=True)
+        except KeyboardInterrupt:
+            pass
         with self.lock:
             done, failed = len(self.completed), len(self.failed)
-        print(f"{done} converted · {failed} failed · files in {self.settings.out_dir}")
+            out_dir = self.settings.out_dir
+        print(f"{done} converted · {failed} failed · files in {out_dir}")

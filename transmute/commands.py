@@ -56,14 +56,15 @@ class Commands:
         except OSError as e:
             self.app.msg("class:err", f"can't use {path}: {e}")
             return
-        self.app.settings.out_dir = path
-        self.app.msg("class:dim", f"output directory: {self.app.settings.out_dir}")
+        self.app.set_out_dir(path)
+        self.app.msg("class:dim", f"output directory: {path}")
 
     def cmd_out(self, arg: str) -> None:
         if arg:
             self._set_out_dir(arg)
             return
-        self.app.msg("class:dim", f"output directory: {self.app.settings.out_dir}")
+        settings = self.app.settings_snapshot()
+        self.app.msg("class:dim", f"output directory: {settings.out_dir}")
         self.app.open_modal(
             Modal(
                 prefix="out ❯ ",
@@ -80,8 +81,9 @@ class Commands:
                     "class:err", f"quality must be one of {', '.join(QUALITIES)}"
                 )
                 return
-            self.app.settings.quality = arg
-        self.app.msg("class:dim", f"quality: {self.app.settings.quality}k")
+            self.app.set_quality(arg)
+        quality = self.app.settings_snapshot().quality
+        self.app.msg("class:dim", f"quality: {quality}k")
 
     def cmd_enrich(self, arg: str) -> None:
         if arg == "off":
@@ -177,9 +179,15 @@ class Commands:
             def blocking() -> int:
                 print(f"Launching {label} login (browser will open)…\n")
                 try:
-                    return subprocess.run(command, check=False).returncode
+                    return subprocess.run(
+                        command,
+                        timeout=300,
+                        check=False,
+                    ).returncode
                 except FileNotFoundError:
                     return -1
+                except subprocess.TimeoutExpired:
+                    return -2
 
             rc = await run_in_terminal(blocking)
             if rc == 0:
@@ -201,6 +209,8 @@ class Commands:
                     "class:err",
                     f"{provider} CLI not found — install it first",
                 )
+            elif rc == -2:
+                app.msg("class:err", f"{provider} login timed out")
             else:
                 app.msg("class:err", "login failed or was cancelled")
 
@@ -208,7 +218,7 @@ class Commands:
 
     def cmd_logout(self, arg: str) -> None:
         app = self.app
-        provider = arg or "claude"  # preserve the original /logout behavior
+        provider = arg or "claude"
         if provider not in ("codex", "claude"):
             app.msg("class:err", "logout provider must be codex or claude")
             return
@@ -276,6 +286,6 @@ class Commands:
         app = self.app
         with app.lock:
             app.history.clear()
+            app.messages.clear()
             app.sel = None
-        app.messages.clear()
         app.refresh()

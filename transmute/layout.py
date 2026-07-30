@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.history import FileHistory
@@ -9,15 +11,14 @@ from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 
-from .config import HISTORY_FILE
 from .style import HINT_PLACEHOLDER, PLACEHOLDER
 from .widgets import PlaceholderProcessor
 
 
-def build_layout(app) -> Layout:
+def build_layout(app, history_file: Path) -> Layout:
     """Create buffers + windows on `app` and return the assembled Layout."""
     app.input_buffer = Buffer(
-        history=FileHistory(str(HISTORY_FILE)),
+        history=FileHistory(str(history_file)),
         multiline=False,
         accept_handler=app._accept,
         enable_history_search=True,
