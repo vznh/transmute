@@ -22,7 +22,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
 from prompt_toolkit.layout.dimension import Dimension
 
-from .commands import Commands
+from .commands import HELP_ROWS, Commands
 from .config import HISTORY_FILE, MAX_WORKERS, Settings
 from .downloader import Job, download_job, extract_urls, is_supported_url
 from .enrich import Enricher, TrackTags, apply_tags
@@ -76,6 +76,7 @@ class App:
         self.sel: int | None = None
         self.modal: Modal | None = None
         self.dir_picker: DirPicker | None = None
+        self.help_open = False
         self.input_notice: tuple[str, str] | None = None
         self._input_notice_id = 0
         self._seq = 0
@@ -107,9 +108,19 @@ class App:
             ("class:header.desc", TAGLINE + "\n"),
         ]
 
+    def _render_help(self):
+        """The /help takeover body: the full command reference, rendered in one
+        pass so nothing is clipped by the rolling message log."""
+        out = [("class:subsection", "\n  Commands\n")]
+        for cmd, desc in HELP_ROWS:
+            out.append(("class:dim", f"    {cmd:<34}{desc}\n"))
+        return out
+
     def _build(self):
         """Body fragments, split where the inline hint input goes (below the
         selected low-confidence entry). Returns (above, below)."""
+        if self.help_open:
+            return self._render_help(), []
         with self.lock:
             active = list(self.active.values())
             queued = self.queued
@@ -186,6 +197,8 @@ class App:
         return [("class:prompt", "❯ ")]
 
     def _input_placeholder(self) -> str:
+        if self.help_open:
+            return ""
         if self.dir_picker:
             if self.dir_picker.stage == "confirm":
                 return f"~/{self.dir_picker.typed} doesn't exist — create it? (y/n)"
@@ -195,6 +208,8 @@ class App:
         return PLACEHOLDER
 
     def _input_hint(self):
+        if self.help_open:
+            return [("class:input.hint", "  esc closes help")]
         if self.dir_picker is not None:
             return [("class:input.hint", "  esc to cancel output directory change")]
         with self.lock:
@@ -401,6 +416,17 @@ class App:
         )
         self.refresh()
 
+    def open_help(self) -> None:
+        self.help_open = True
+        self.sel = None
+        self.input_buffer.reset()
+        self._update_focus()
+        self.refresh()
+
+    def close_help(self) -> None:
+        self.help_open = False
+        self.refresh()
+
     def open_modal(self, modal: Modal) -> None:
         with self.lock:
             self.modal = modal
@@ -589,7 +615,7 @@ class App:
         if tags.kind == "derivative" and tags.based_on:
             parts.append(f"derivative of {tags.based_on}")
         detail = f"  ({' · '.join(parts)})" if parts else ""
-        return f"{tags.artist} — {tags.title}{detail}"
+        return f"{tags.title}{detail}"
 
     @staticmethod
     def _error_line(error: Exception) -> str:
@@ -599,6 +625,8 @@ class App:
     # ── input handling ──────────────────────────────────────────────────
 
     def _accept(self, buff: Buffer) -> bool:
+        if self.help_open:
+            return False
         if self.dir_picker:
             self._accept_dir(buff)
             return False

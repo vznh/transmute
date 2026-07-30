@@ -156,6 +156,35 @@ def test_out_picker_escape_cancels_without_changing_dir(app):
     assert app.settings.out_dir == before
 
 
+def test_help_opens_takeover_with_full_command_reference(app):
+    app.commands.cmd_help("")
+    assert app.help_open is True
+    body = "".join(text for _, text in app._render_help())
+    # /out is the first row — the one the old message-log render clipped.
+    for cmd in ("/out", "/quality", "/enrich", "/quit"):
+        assert cmd in body
+    assert app._input_hint() == [("class:input.hint", "  esc closes help")]
+
+
+def test_help_body_replaces_processing_and_history(app):
+    app.add_entry(Entry("class:ok", "done", "ok", Job(url="u1")))
+    app.open_help()
+    above, below = app._build()
+    text = "".join(t for _, t in above)
+    assert "Commands" in text
+    assert "  Processing\n" not in text  # normal body sections are gone
+    assert "  History\n" not in text
+    assert below == []
+
+
+def test_help_escape_closes_and_input_stays_inert(app):
+    app.open_help()
+    assert app.help_open is True
+    app._accept(app.input_buffer)  # enter is a no-op while help is open
+    app.close_help()  # esc
+    assert app.help_open is False
+
+
 def test_unknown_command_reports_error(app):
     app.commands.dispatch("/nope")
     assert any("unknown command" in line for _, line in app.messages)
