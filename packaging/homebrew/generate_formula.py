@@ -33,7 +33,10 @@ from packaging.version import Version
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATH = REPO_ROOT / "uv.lock"
-FORMULA_PATH = Path(__file__).resolve().parent / "transmute.rb"
+# Homebrew only discovers formulae in a tap's root, `Formula/`, or
+# `HomebrewFormula/`. This repository is its own tap, so the generated formula
+# has to live in `Formula/` rather than beside the generator.
+FORMULA_PATH = REPO_ROOT / "Formula" / "transmute.rb"
 INIT_PATH = REPO_ROOT / "transmute" / "__init__.py"
 
 ROOT_PACKAGE = "transmute-cli"
@@ -236,7 +239,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", default=None, help="git tag for --source github; defaults to the version")
     parser.add_argument("--url", default=None, help="source URL; overrides --source")
     parser.add_argument("--sha256", default=None, help="source sha256; overrides --source")
-    parser.add_argument("--write", action="store_true", help=f"write to {FORMULA_PATH.name}")
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help=f"write to {FORMULA_PATH.relative_to(REPO_ROOT)}",
+    )
     args = parser.parse_args(argv)
 
     try:

@@ -3,8 +3,8 @@ class Transmute < Formula
 
   desc "Convert YouTube or SoundCloud links into rich MP3s"
   homepage "https://github.com/vznh/transmute"
-  url "https://pypi.org/project/transmute-cli/0.2a/#PENDING-RELEASE"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  url "https://github.com/vznh/transmute/archive/refs/tags/0.2a.tar.gz"
+  sha256 "18378aa757680aad6b50695515513eac4075139223769232cf32f88dcc3e8b88"
   head "https://github.com/vznh/transmute.git", branch: "main"
 
   # jiter, pydantic-core ship no pure-Python wheel, so pip compiles
