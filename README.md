@@ -1,6 +1,25 @@
 # Transmute
 
-Convert YouTube or SoundCloud links into rich MP3s, from an interactive REPL.
+Convert YouTube or SoundCloud links into rich MP3s, from your terminal. We support single or batch operations.
+
+## How it works  
+1. Authenticate
+   
+You can do any of the two options:
+- Authenticate with your Claude or Codex account by signing in
+- Bring your own API key (only Codex, Claude supported for now)
+2. Provide a correct URL
+  
+We support only https://[youtube.com, soundcloud.com] links.  
+
+3. Ensure you output to the right directory
+
+   
+4. We use Claude / Codex to utilize Web Search to ensure proper metadata is fulfilled
+   
+- This works especially for underground rap artists. Often times, uploaders are not the name of the author and we do a double-check and sanity check to ensure that the right artist is associated with the song.
+- The image is not altered. From the link you provide, we attach that image to it. 
+  
 
 ## Requirements
 
