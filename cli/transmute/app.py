@@ -10,11 +10,14 @@ entries retry on Enter; low-confidence entries open an inline hint input.
 from __future__ import annotations
 
 import shutil
+import sys
 import threading
+import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -29,7 +32,6 @@ from prompt_toolkit.styles import Style
 
 from .downloader import MAX_WORKERS, Job, Settings, download_job, extract_urls
 from .enrich import Enricher, TrackTags, apply_tags
-from .ui import console, set_terminal_title
 
 HISTORY_FILE = Path.home() / ".transmute" / "history"
 
@@ -78,13 +80,13 @@ class Modal:
 
     prefix: str
     placeholder: str
-    on_submit: object  # Callable[[str], None]
+    on_submit: Callable[[str], None]
     initial: str = ""
 
 
 class PlaceholderProcessor(Processor):
-    def __init__(self, text) -> None:
-        self.text = text  # str or zero-arg callable
+    def __init__(self, text: str | Callable[[], str]) -> None:
+        self.text = text
 
     def apply_transformation(self, ti):
         if ti.lineno == 0 and not ti.document.text:
@@ -308,8 +310,6 @@ class App:
 
         @kb.add("c-c")
         def _(event):
-            import time
-
             now = time.monotonic()
             if self.sel is not None:
                 self.sel = None
@@ -411,6 +411,25 @@ class App:
 
     # ── background pipeline ─────────────────────────────────────────────
 
+    @staticmethod
+    def _display_name(job: Job) -> str:
+        return job.path.name if job.path else (job.title or job.url)
+
+    def _set_active(self, seq: int, text: str) -> None:
+        with self.lock:
+            self.active[seq] = text
+        self.refresh()
+
+    def _note_done(self, job: Job, desc: str | None) -> None:
+        line = f"✔ {self._display_name(job)}"
+        if desc:
+            line += f"   ♪ {desc}"
+        self.add_entry(Entry("class:ok", line, "ok", job))
+
+    def _note_low_confidence(self, job: Job, again: bool = False) -> None:
+        tail = "still unconfirmed, ↑ to add another hint" if again else "artist unconfirmed, ↑ to add a hint"
+        self.add_entry(Entry("class:warn", f"⚠ “{(job.title or '')[:40]}” — {tail}", "hint", job))
+
     def submit_urls(self, urls: list[str]) -> None:
         with self.lock:
             self.queued += len(urls)
@@ -429,12 +448,8 @@ class App:
 
         def on_progress(j: Job, frac: float | None) -> None:
             name = (j.title or j.url)[:44]
-            with self.lock:
-                if frac is None:
-                    self.active[seq] = f"converting  {name}"
-                else:
-                    self.active[seq] = f"↓ {frac:>4.0%}  {name}"
-            self.refresh()
+            phase = "converting  " if frac is None else f"↓ {frac:>4.0%}  "
+            self._set_active(seq, phase + name)
 
         try:
             download_job(job, self.settings, on_progress)
@@ -450,24 +465,14 @@ class App:
 
             desc = tags = None
             if self.enricher.enabled:
-                with self.lock:
-                    self.active[seq] = f"enriching  {(job.title or '')[:44]}"
-                self.refresh()
+                self._set_active(seq, f"enriching  {(job.title or '')[:44]}")
                 desc, tags = self._enrich(job)
 
             with self.lock:
                 self.completed.append(job)
-            name = job.path.name if job.path else (job.title or job.url)
-            line = f"✔ {name}"
-            if desc:
-                line += f"   ♪ {desc}"
-            self.add_entry(Entry("class:ok", line, "ok", job))
+            self._note_done(job, desc)
             if tags is not None and tags.confidence == "low":
-                self.add_entry(Entry(
-                    "class:warn",
-                    f"⚠ “{(job.title or '')[:40]}” — artist unconfirmed, ↑ to add a hint",
-                    "hint", job,
-                ))
+                self._note_low_confidence(job)
         finally:
             with self.lock:
                 self.active.pop(seq, None)
@@ -492,14 +497,9 @@ class App:
         desc, tags = self._enrich(job, hint=hint)
         self._remove_entry(placeholder)
         if desc:
-            name = job.path.name if job.path else (job.title or job.url)
-            self.add_entry(Entry("class:ok", f"✔ {name}   ♪ {desc}", "ok", job))
+            self._note_done(job, desc)
             if tags is not None and tags.confidence == "low":
-                self.add_entry(Entry(
-                    "class:warn",
-                    f"⚠ “{(job.title or '')[:40]}” — still unconfirmed, ↑ to add another hint",
-                    "hint", job,
-                ))
+                self._note_low_confidence(job, again=True)
         else:
             self.msg("class:warn", f"⚠ retry failed: {self.enricher.last_error}")
 
@@ -734,18 +734,19 @@ class App:
         with self.lock:
             busy = len(self.active) + self.queued
         if busy:
-            console.print(f"[grey50]finishing {busy} job{'s' if busy != 1 else ''}… (ctrl-c to abandon)[/grey50]")
+            print(f"finishing {busy} job{'s' if busy != 1 else ''}… (ctrl-c to abandon)")
             try:
                 self.pool.shutdown(wait=True)
             except KeyboardInterrupt:
                 pass
         with self.lock:
             done, failed = len(self.completed), len(self.failed)
-        console.print(f"[grey50]{done} converted · {failed} failed · files in {self.settings.out_dir}[/grey50]")
+        print(f"{done} converted · {failed} failed · files in {self.settings.out_dir}")
 
 
 def main() -> None:
-    set_terminal_title("Transmute")
+    sys.stdout.write("\x1b]0;Transmute\x07")  # terminal tab title
+    sys.stdout.flush()
     App().run()
 
 

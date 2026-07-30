@@ -86,7 +86,7 @@ def download_job(job: Job, settings: Settings, on_progress=None) -> Job:
         if downloads and downloads[0].get("filepath"):
             job.path = Path(downloads[0]["filepath"])
         job.status = "done"
-    except Exception as e:  # yt_dlp raises DownloadError and friends
+    except Exception as e:
         job.status = "error"
         job.error = str(e).split("\n")[0][:200]
 

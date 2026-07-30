@@ -5,7 +5,6 @@ description = "Convert YouTube or SoundCloud links into rich MP3s."
 requires-python = ">=3.10"
 dependencies = [
     "yt-dlp>=2024.12.6",
-    "rich>=13.7",
     "prompt_toolkit>=3.0.43",
     "anthropic>=0.60",
     "mutagen>=1.47",
