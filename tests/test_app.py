@@ -288,17 +288,12 @@ def test_modal_uses_contextual_input_hint(app):
     assert "enter applies · esc cancels" in app._input_hint()[0][1]
 
 
-@pytest.mark.parametrize(
-    ("platform", "shortcut"),
-    [("darwin", "CMD + C"), ("linux", "CTRL + C")],
-)
-def test_ctrl_c_warns_with_platform_shortcut_then_exits(app, monkeypatch, platform, shortcut):
-    monkeypatch.setattr("transmute.keys.sys.platform", platform)
+def test_ctrl_c_warns_then_exits(app):
     event = SimpleNamespace(app=SimpleNamespace(exit=Mock()))
     binding = app.app.key_bindings.get_bindings_for_keys((Keys.ControlC,))[-1]
 
     binding.handler(event)
-    assert f"press {shortcut} to exit" in app._input_hint()[0][1]
+    assert "press CTRL+C again to exit" in app._input_hint()[0][1]
     event.app.exit.assert_not_called()
 
     binding.handler(event)

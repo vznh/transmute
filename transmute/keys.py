@@ -9,7 +9,7 @@ from prompt_toolkit.key_binding import KeyBindings
 
 
 def _exit_shortcut() -> str:
-    return "Ctrl+C"
+    return "CTRL+C"
 
 
 def build_key_bindings(app) -> KeyBindings:
@@ -96,7 +96,7 @@ def build_key_bindings(app) -> KeyBindings:
             )
             app.show_input_notice(
                 "class:input.warn",
-                f"press {_exit_shortcut()} to exit{note}",
+                f"press {_exit_shortcut()} again to exit{note}",
                 duration=2.0,
             )
 
