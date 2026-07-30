@@ -23,9 +23,10 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.layout.dimension import Dimension
 
 from .commands import HELP_ROWS, Commands
-from .config import HISTORY_FILE, MAX_WORKERS, Settings
+from .config import ACTIVITY_FILE, HISTORY_FILE, MAX_WORKERS, STATE_DIR, Settings
 from .downloader import Job, download_job, extract_urls, is_supported_url
 from .enrich import Enricher, TrackTags, apply_tags
+from .history import ActivityStore, HistoryStoreError, StoredJob
 from .keys import build_key_bindings
 from .layout import build_layout
 from .style import HELP_HINT, HISTORY_SHOWN, MESSAGES_SHOWN, PLACEHOLDER, STYLE, TAGLINE
@@ -63,6 +64,7 @@ class App:
         *,
         history_file: Path = HISTORY_FILE,
         pool: Executor | None = None,
+        activity_store: ActivityStore | None = None,
     ) -> None:
         self.settings = Settings()
         self.enricher = Enricher()
@@ -72,6 +74,11 @@ class App:
         self.messages: deque[tuple[str, str]] = deque(maxlen=MESSAGES_SHOWN)
         self.pool = pool or ThreadPoolExecutor(max_workers=MAX_WORKERS)
         self.lock = threading.Lock()
+        self.activity_lock = threading.RLock()
+        self.activity_store: ActivityStore | None = activity_store
+        self.session_id = ""
+        self._run_outcomes: dict[str, str] = {}
+        self._persistence_warning_shown = False
         self.active: dict[int, str] = {}
         self.queued = 0
         self.sel: int | None = None
@@ -82,7 +89,8 @@ class App:
         self._input_notice_id = 0
         self._seq = 0
         self._last_ctrl_c = 0.0
-        history_file.parent.mkdir(parents=True, exist_ok=True)
+        self._prepare_input_history(history_file)
+        self._restore_activity()
         self.commands = Commands(self)
         layout = build_layout(self, history_file)
         self.app = Application(
@@ -91,6 +99,84 @@ class App:
             style=STYLE,
             full_screen=True,
         )
+
+    @staticmethod
+    def _prepare_input_history(path: Path) -> None:
+        """Create the prompt-recall file with private local permissions."""
+        path = Path(path).expanduser()
+        parent_was_created = not path.parent.exists()
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if parent_was_created or (
+            path.parent == STATE_DIR and not path.parent.is_symlink()
+        ):
+            path.parent.chmod(0o700)
+        path.touch(mode=0o600, exist_ok=True)
+        path.chmod(0o600)
+
+    def _restore_activity(self) -> None:
+        """Restore durable job outcomes before the first UI render."""
+        if self.activity_store is None:
+            try:
+                self.activity_store = ActivityStore(ACTIVITY_FILE)
+            except HistoryStoreError as exc:
+                self._warn_persistence(exc)
+                return
+
+        try:
+            self.session_id = self.activity_store.start_session()
+            records = self.activity_store.load_jobs()
+        except HistoryStoreError as exc:
+            self._warn_persistence(exc)
+            self.activity_store = None
+            self.session_id = ""
+            return
+
+        for record in records:
+            self._restore_record(record)
+
+    def _restore_record(self, record: StoredJob) -> None:
+        job = record.job
+        if job.status == "done":
+            self.completed.append(job)
+            self.history.append(self._done_entry(job, record.detail))
+            if (
+                record.needs_hint
+                and not record.hint_in_progress
+                and job.path
+                and job.path.is_file()
+            ):
+                self.history.append(
+                    self._hint_entry(job, again=record.hint_attempts > 0)
+                )
+        elif job.status == "error":
+            self.failed.append(job)
+            self.history.append(self._failure_entry(job))
+
+    def _warn_persistence(self, error: Exception) -> None:
+        with self.lock:
+            if self._persistence_warning_shown:
+                return
+            self._persistence_warning_shown = True
+            self.messages.append(
+                (
+                    "class:warn",
+                    f"⚠ activity history unavailable for this run: {str(error)[:100]}",
+                )
+            )
+        self.refresh()
+
+    def _persist(self, method: str, *args, **kwargs):
+        store = self.activity_store
+        if store is None:
+            return None
+        try:
+            return getattr(store, method)(*args, **kwargs)
+        except HistoryStoreError as exc:
+            # Avoid repeatedly stalling the UI on the same unavailable store.
+            # This run continues in memory; the next launch will try again.
+            self.activity_store = None
+            self._warn_persistence(exc)
+            return None
 
     # ── rendering ───────────────────────────────────────────────────────
 
@@ -450,6 +536,44 @@ class App:
     def _display_name(job: Job) -> str:
         return job.path.name if job.path else (job.title or job.url)
 
+    def _done_entry(self, job: Job, detail: str | None) -> Entry:
+        return Entry(
+            "class:ok",
+            f"✔ {self._display_name(job)}",
+            "ok",
+            job,
+            detail=detail,
+        )
+
+    @staticmethod
+    def _failure_entry(job: Job) -> Entry:
+        # Only retryable failures become selectable. Retrying an unsupported
+        # site or deleted video cannot succeed without something else changing.
+        if job.retryable:
+            line = (
+                f"✘ {job.url[:44]}  {job.error or 'unknown error'}"
+                " — ↑ + enter to retry"
+            )
+            kind = "err"
+        else:
+            line = f"✘ {job.url[:44]}  {job.error or 'unknown error'}"
+            kind = "info"
+        return Entry("class:err", line, kind, job)
+
+    @staticmethod
+    def _hint_entry(job: Job, again: bool = False) -> Entry:
+        tail = (
+            "still unconfirmed, ↑ to add another hint"
+            if again
+            else "artist unconfirmed, ↑ to add a hint"
+        )
+        return Entry(
+            "class:warn",
+            f"⚠ “{(job.title or '')[:40]}” — {tail}",
+            "hint",
+            job,
+        )
+
     def _set_active(self, seq: int, text: str) -> None:
         with self.lock:
             self.active[seq] = text
@@ -457,19 +581,10 @@ class App:
 
     def _note_done(self, job: Job, tags: TrackTags | None) -> None:
         detail = self._detail_line(tags) if tags else None
-        self.add_entry(
-            Entry("class:ok", f"✔ {self._display_name(job)}", "ok", job, detail=detail)
-        )
+        self.add_entry(self._done_entry(job, detail))
 
     def _note_low_confidence(self, job: Job, again: bool = False) -> None:
-        tail = (
-            "still unconfirmed, ↑ to add another hint"
-            if again
-            else "artist unconfirmed, ↑ to add a hint"
-        )
-        self.add_entry(
-            Entry("class:warn", f"⚠ “{(job.title or '')[:40]}” — {tail}", "hint", job)
-        )
+        self.add_entry(self._hint_entry(job, again))
 
     def _note_failed(self, job: Job) -> None:
         with self.lock:
@@ -499,21 +614,75 @@ class App:
                 self.completed.append(job)
 
     def submit_urls(self, urls: list[str]) -> None:
+        self._submit_jobs([Job(url=url) for url in urls])
+
+    @staticmethod
+    def _reset_for_retry(job: Job) -> None:
+        job.status = "queued"
+        job.error = None
+        job.error_detail = None
+        job.retryable = True
+
+    def _submit_jobs(self, jobs: list[Job]) -> list[Job]:
+        if not jobs:
+            return []
+        for job in jobs:
+            self._reset_for_retry(job)
+        with self.activity_lock:
+            claimed_ids = self._persist("queue_jobs", jobs, self.session_id)
+            claimed_jobs = (
+                jobs
+                if claimed_ids is None
+                else [job for job in jobs if job.history_id in claimed_ids]
+            )
+            skipped = len(jobs) - len(claimed_jobs)
+            with self.lock:
+                self.queued += len(claimed_jobs)
+                for job in claimed_jobs:
+                    self._run_outcomes[job.history_id] = "queued"
+        if skipped:
+            self.msg(
+                "class:dim",
+                f"{skipped} job{'s are' if skipped != 1 else ' is'} "
+                "already active in another Transmute session",
+            )
         with self.lock:
-            self.queued += len(urls)
             settings = self.settings
         self.refresh()
-        for url in urls:
-            self.pool.submit(self._process, url, settings)
+        for job in claimed_jobs:
+            self.pool.submit(self._process, job, settings)
+        return claimed_jobs
 
-    def _process(self, url: str, settings: Settings) -> None:
+    def _record_failed_outcome(self, job: Job) -> None:
+        with self.activity_lock:
+            self._persist("save_failure", job)
+            with self.lock:
+                self._run_outcomes[job.history_id] = "error"
+            self._note_failed(job)
+
+    def _record_successful_outcome(
+        self,
+        job: Job,
+        tags: TrackTags | None,
+    ) -> None:
+        detail = self._detail_line(tags) if tags else None
+        needs_hint = tags is not None and tags.confidence == "low"
+        with self.activity_lock:
+            self._persist("save_success", job, detail, needs_hint)
+            with self.lock:
+                self._run_outcomes[job.history_id] = "done"
+            self._record_completed(job)
+            self._note_done(job, tags)
+            if needs_hint:
+                self._note_low_confidence(job)
+
+    def _process(self, job: Job, settings: Settings) -> None:
         with self.lock:
             self._seq += 1
             seq = self._seq
             self.queued -= 1
-            self.active[seq] = f"starting  {url[:50]}"
+            self.active[seq] = f"starting  {job.url[:50]}"
         self.refresh()
-        job = Job(url=url)
 
         def on_progress(j: Job, frac: float | None) -> None:
             name = (j.title or j.url)[:44]
@@ -523,7 +692,7 @@ class App:
         try:
             download_job(job, settings, on_progress)
             if job.status != "done":
-                self._note_failed(job)
+                self._record_failed_outcome(job)
                 return
 
             tags = None
@@ -531,20 +700,16 @@ class App:
                 self._set_active(seq, f"enriching  {(job.title or '')[:44]}")
                 tags = self._enrich(job)
 
-            self._record_completed(job)
-            self._note_done(job, tags)
-            if tags is not None and tags.confidence == "low":
-                self._note_low_confidence(job)
+            self._record_successful_outcome(job, tags)
         except Exception as error:  # noqa: BLE001
             message = self._error_line(error)
             if job.status == "done":
                 self.msg("class:warn", f"⚠ post-processing skipped: {message}")
-                self._record_completed(job)
-                self._note_done(job, None)
+                self._record_successful_outcome(job, None)
             else:
                 job.status = "error"
                 job.error = message
-                self._note_failed(job)
+                self._record_failed_outcome(job)
         finally:
             with self.lock:
                 self.active.pop(seq, None)
@@ -591,26 +756,82 @@ class App:
         job.title = tags.title or job.title
         return tags
 
-    def _rehint(self, job: Job, hint: str, placeholder: Entry) -> None:
+    def _rehint(
+        self,
+        job: Job,
+        hint: str,
+        placeholder: Entry,
+        claim_token: str | None,
+    ) -> None:
         tags = self._enrich(job, hint=hint, failure_label="retry failed")
-        self._remove_entry(placeholder)
-        if tags is not None:
-            self._note_done(job, tags)
-            if tags.confidence == "low":
+        with self.activity_lock:
+            self._remove_entry(placeholder)
+            if tags is not None:
+                needs_hint = tags is not None and tags.confidence == "low"
+                persisted = (
+                    self._persist(
+                        "save_hint_success",
+                        job,
+                        self._detail_line(tags),
+                        needs_hint,
+                        claim_token,
+                    )
+                    if claim_token
+                    else None
+                )
+                if persisted is False:
+                    self.msg(
+                        "class:dim",
+                        "hint result was superseded by another Transmute session",
+                    )
+                    return
+                with self.lock:
+                    self.history = [
+                        entry
+                        for entry in self.history
+                        if not (entry.job is job and entry.kind == "ok")
+                    ]
+                self._record_completed(job)
+                self._note_done(job, tags)
+                if needs_hint:
+                    self._note_low_confidence(job, again=True)
+            else:
+                released = (
+                    self._persist("release_hint", job.history_id, claim_token)
+                    if claim_token
+                    else None
+                )
+                if released is False:
+                    return
+                with self.lock:
+                    has_done_entry = any(
+                        entry.job is job and entry.kind == "ok"
+                        for entry in self.history
+                    )
+                self._record_completed(job)
+                if not has_done_entry:
+                    self._note_done(job, None)
                 self._note_low_confidence(job, again=True)
 
     def _retry_selected(self) -> None:
-        with self.lock:
-            if self.sel is None or self.sel >= len(self.history):
-                return
-            entry = self.history[self.sel]
-            if entry.kind != "err" or entry.job is None:
-                return
-            del self.history[self.sel]
-            self.failed = [j for j in self.failed if j is not entry.job]
-            self.sel = None
+        with self.activity_lock:
+            with self.lock:
+                if self.sel is None or self.sel >= len(self.history):
+                    return
+                entry = self.history[self.sel]
+                if entry.kind != "err" or entry.job is None:
+                    return
+            # Queue durably before hiding the old failure, so a process crash
+            # cannot lose the only retryable record.
+            self._submit_jobs([entry.job])
+            with self.lock:
+                try:
+                    self.history.remove(entry)
+                except ValueError:
+                    pass
+                self.failed = [j for j in self.failed if j is not entry.job]
+                self.sel = None
         self._update_focus()
-        self.submit_urls([entry.job.url])
 
     @staticmethod
     def _detail_line(tags: TrackTags) -> str | None:
@@ -683,22 +904,66 @@ class App:
         text = buff.text.strip()
         if not text:
             return False
-        with self.lock:
-            if self.sel is None or self.sel >= len(self.history):
+        with self.activity_lock:
+            with self.lock:
+                if self.sel is None or self.sel >= len(self.history):
+                    return False
+                selected = self.sel
+                entry = self.history[selected]
+                if entry.kind != "hint" or entry.job is None:
+                    return False
+                job = entry.job
+
+            claim = self._persist("claim_hint", job, self.session_id)
+            if claim is False:
+                self.msg(
+                    "class:dim",
+                    "that hint is already being checked in another Transmute session",
+                )
                 return False
-            entry = self.history[self.sel]
-            if entry.kind != "hint" or entry.job is None:
-                return False
+            claim_token = claim if isinstance(claim, str) else None
             placeholder = Entry(
                 "class:dim",
-                f"⧗ re-checking “{(entry.job.title or '')[:40]}” with your hint…",
+                f"⧗ re-checking “{(job.title or '')[:40]}” with your hint…",
                 "info",
-                entry.job,
+                job,
             )
-            self.history[self.sel] = placeholder
-            self.sel = None
+            with self.lock:
+                if (
+                    selected >= len(self.history)
+                    or self.history[selected] is not entry
+                    or self.sel != selected
+                ):
+                    replaced = False
+                else:
+                    self.history[selected] = placeholder
+                    self.sel = None
+                    replaced = True
+            if not replaced:
+                if claim_token:
+                    self._persist("release_hint", job.history_id, claim_token)
+                return False
         self._update_focus()
-        self.pool.submit(self._rehint, entry.job, text, placeholder)
+        try:
+            self.pool.submit(
+                self._rehint,
+                job,
+                text,
+                placeholder,
+                claim_token,
+            )
+        except RuntimeError as error:
+            with self.activity_lock:
+                if claim_token:
+                    self._persist("release_hint", job.history_id, claim_token)
+                with self.lock:
+                    try:
+                        index = self.history.index(placeholder)
+                    except ValueError:
+                        pass
+                    else:
+                        self.history[index] = entry
+            self.msg("class:err", f"could not schedule hint lookup: {error}")
         self.refresh()
         return False
 
@@ -708,22 +973,36 @@ class App:
                 "class:warn",
                 "⚠ ffmpeg not found — install it with: brew install ffmpeg",
             )
+        drained = False
         try:
-            self.app.run()
-        except (EOFError, KeyboardInterrupt):
-            pass  # non-tty input ends with EOF; treat as a normal quit
+            try:
+                self.app.run()
+            except (EOFError, KeyboardInterrupt):
+                pass  # non-tty input ends with EOF; treat as a normal quit
+
+            # Back in the normal terminal: drain any in-flight work.
+            with self.lock:
+                busy = len(self.active) + self.queued
+            if busy:
+                print(
+                    f"finishing {busy} job{'s' if busy != 1 else ''}… "
+                    "(ctrl-c to abandon)"
+                )
+            try:
+                self.pool.shutdown(wait=True)
+            except KeyboardInterrupt:
+                pass
+            else:
+                drained = True
+        finally:
+            # A Ctrl-C during executor draining does not actually stop Python's
+            # worker threads. Keep this session live until the process exits so
+            # another REPL cannot claim and mutate the same file concurrently.
+            if self.session_id and drained:
+                self._persist("finish_session", self.session_id)
 
         with self.lock:
-            busy = len(self.active) + self.queued
-        if busy:
-            print(
-                f"finishing {busy} job{'s' if busy != 1 else ''}… (ctrl-c to abandon)"
-            )
-        try:
-            self.pool.shutdown(wait=True)
-        except KeyboardInterrupt:
-            pass
-        with self.lock:
-            done, failed = len(self.completed), len(self.failed)
+            done = sum(state == "done" for state in self._run_outcomes.values())
+            failed = sum(state == "error" for state in self._run_outcomes.values())
             out_dir = self.settings.out_dir
         print(f"{done} converted · {failed} failed · files in {out_dir}")

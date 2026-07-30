@@ -44,6 +44,19 @@ live at the bottom, so keep pasting while earlier tracks convert. A status bar b
 the prompt shows the output dir, bitrate, and active/queued work. MP3s are written
 at 320kbps with embedded metadata and cover art, to `~/Downloads` by default.
 
+## History and persistence
+
+Prompt recall and structured download activity persist locally across restarts.
+Recent completed and failed tracks are restored when Transmute opens; restored
+failures can be retried and restored low-confidence entries can receive hints just
+like entries from the current session. `/list` includes recent persisted tracks.
+
+Prompt recall is stored in `~/.transmute/history`, and download activity is stored
+in `~/.transmute/activity.sqlite3`. URLs and metadata remain local and unencrypted,
+with owner-only permissions on the storage directory and files. `/clear` removes
+persisted completed and failed activity as well as clearing the current view.
+In-flight jobs are not canceled, so they can appear again when they finish.
+
 ## Metadata enrichment
 
 After each download, Transmute runs a provider-backed web search to find the track's
@@ -81,11 +94,11 @@ automatically.
 | `/enrich [codex\|claude\|api\|on\|off]` | choose or toggle web-search metadata enrichment |
 | `/key [clear]` | securely enter one OpenAI or Anthropic API key, or clear it |
 | `↑` / `↓` | select failed or low-confidence History entries — Enter retries a failure; low-confidence entries open an inline hint input |
-| `/list` | show tracks converted this session |
+| `/list` | show recent converted tracks, including persisted results |
 | `/retry` | requeue failed downloads |
 | `/login [codex\|claude]` | log in to a subscription provider (opens browser) |
 | `/logout [codex\|claude]` | log out of a subscription provider |
-| `/clear` | clear the screen |
+| `/clear` | clear completed and failed activity from the screen and persistent history |
 | `/quit` | exit (or Ctrl-D / double Ctrl-C) |
 
 ## Development
@@ -107,6 +120,7 @@ as `just run`, `just test`, `just lint`, and `just check`.
 - `transmute/widgets.py` — reusable prompt components
 - `transmute/style.py` — theme and user-facing UI constants
 - `transmute/config.py` — settings and shared operational constants
+- `transmute/history.py` — persistent download activity storage
 - `transmute/downloader.py` — local yt-dlp/ffmpeg service
 - `transmute/enrich.py` — provider selection, web research, and ID3 tagging
 - `tests/` — state-machine and service tests

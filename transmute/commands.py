@@ -17,8 +17,8 @@ HELP_ROWS = [
     ("/quality [128|192|256|320]", "show or set MP3 bitrate (kbps)"),
     ("/enrich [codex|claude|api|on|off]", "choose or toggle metadata enrichment"),
     ("/key [clear]", "securely set or clear one API key"),
-    ("/list", "show all tracks from this session"),
-    ("/retry", "requeue all failed downloads"),
+    ("/list", "show recent converted and failed tracks across sessions"),
+    ("/retry", "requeue all retryable failed downloads"),
     ("/login [codex|claude]", "log in to a subscription provider"),
     ("/logout [codex|claude]", "log out of a subscription provider"),
     ("/clear", "clear history and messages"),
@@ -270,19 +270,41 @@ class Commands:
 
     def cmd_retry(self, _arg: str) -> None:
         app = self.app
-        with app.lock:
-            failed, app.failed = app.failed, []
-            app.history = [e for e in app.history if e.kind != "err"]
-            app.sel = None
-        if not failed:
-            app.msg("class:dim", "no failed downloads to retry")
-            return
-        app.submit_urls([j.url for j in failed])
+        with app.activity_lock:
+            with app.lock:
+                failed = [job for job in app.failed if job.retryable]
+            if not failed:
+                app.msg("class:dim", "no failed downloads to retry")
+                return
+
+            # Persist the queued transition before removing the actionable
+            # failures from the current view.
+            app._submit_jobs(failed)
+            retry_ids = {job.history_id for job in failed}
+            with app.lock:
+                app.failed = [
+                    job for job in app.failed if job.history_id not in retry_ids
+                ]
+                app.history = [
+                    entry
+                    for entry in app.history
+                    if not (
+                        entry.kind == "err"
+                        and entry.job is not None
+                        and entry.job.history_id in retry_ids
+                    )
+                ]
+                app.sel = None
 
     def cmd_clear(self, _arg: str) -> None:
         app = self.app
-        with app.lock:
-            app.history.clear()
-            app.messages.clear()
-            app.sel = None
+        with app.activity_lock:
+            with app.lock:
+                app.messages.clear()
+            app._persist("clear")
+            with app.lock:
+                app.history.clear()
+                app.completed.clear()
+                app.failed.clear()
+                app.sel = None
         app.refresh()

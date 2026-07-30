@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-HISTORY_FILE = Path.home() / ".transmute" / "history"
+STATE_DIR = Path.home() / ".transmute"
+HISTORY_FILE = STATE_DIR / "history"
+ACTIVITY_FILE = STATE_DIR / "activity.sqlite3"
 QUALITIES = ("128", "192", "256", "320")
 MAX_WORKERS = 4
 
