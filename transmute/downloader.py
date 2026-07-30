@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from .config import Settings
 
 URL_RE = re.compile(r"https?://(?:(?!https?://)\S)+")
+JobStatus = Literal["queued", "downloading", "converting", "done", "error"]
+ProgressCallback = Callable[["Job", float | None], None]
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # (substring of the lowercased yt-dlp message, short human message, retryable)
@@ -68,7 +72,7 @@ def is_supported_url(url: str) -> bool:
 @dataclass
 class Job:
     url: str
-    status: str = "queued"  # queued | downloading | converting | done | error
+    status: JobStatus = "queued"
     title: str | None = None
     uploader: str | None = None
     duration: int | None = None
@@ -118,22 +122,25 @@ def extract_urls(text: str) -> list[str]:
     return URL_RE.findall(text)
 
 
-def download_job(job: Job, settings: Settings, on_progress=None) -> Job:
-    """Download one URL to MP3. on_progress(job, fraction|None) fires on updates."""
+def download_job(
+    job: Job,
+    settings: Settings,
+    on_progress: ProgressCallback | None = None,
+) -> Job:
+    """Download one URL to MP3 and normalize third-party failures onto `job`."""
     import yt_dlp
-
-    settings.out_dir.mkdir(parents=True, exist_ok=True)
 
     def hook(d: dict) -> None:
         info = d.get("info_dict") or {}
         if info.get("title"):
             job.title = info["title"]
-        if d["status"] == "downloading":
+        status = d.get("status")
+        if status == "downloading":
             job.status = "downloading"
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             if on_progress and total:
                 on_progress(job, d.get("downloaded_bytes", 0) / total)
-        elif d["status"] == "finished":
+        elif status == "finished":
             job.status = "converting"
             if on_progress:
                 on_progress(job, None)
@@ -161,6 +168,7 @@ def download_job(job: Job, settings: Settings, on_progress=None) -> Job:
     }
 
     try:
+        settings.out_dir.mkdir(parents=True, exist_ok=True)
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(job.url, download=True)
         job.title = info.get("title") or job.title

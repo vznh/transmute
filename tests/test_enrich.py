@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from subprocess import CompletedProcess
+from threading import Barrier, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -10,6 +11,7 @@ from transmute.enrich import (
     Enricher,
     TrackTags,
     _safe_filename,
+    apply_tags,
 )
 
 
@@ -24,6 +26,60 @@ def test_safe_filename_plain():
 def test_tracktags_defaults():
     t = TrackTags(artist="X", title="Y")
     assert t.album is None and t.confidence is None and t.kind is None
+
+
+def test_apply_tags_preserves_unowned_fields_and_avoids_collision(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "Source - Upload.mp3"
+    target = tmp_path / "Artist - Song.mp3"
+    source.touch()
+    target.touch()
+
+    class FakeAudio(dict):
+        def save(self):
+            self.saved = True
+
+    audio = FakeAudio(composer=["Existing Composer"])
+    monkeypatch.setattr("mutagen.easyid3.EasyID3", lambda _path: audio)
+
+    result = apply_tags(
+        source,
+        TrackTags(
+            artist="Artist",
+            title="Song",
+            album="Album",
+            year="2026",
+            genre="Electronic",
+        ),
+    )
+
+    assert result == source
+    assert source.exists() and target.exists()
+    assert audio["composer"] == ["Existing Composer"]
+    assert audio["artist"] == "Artist"
+    assert audio["title"] == "Song"
+    assert audio.saved is True
+
+
+def test_apply_tags_renames_to_sanitized_metadata_name(monkeypatch, tmp_path):
+    source = tmp_path / "Source - Upload.mp3"
+    source.touch()
+
+    class FakeAudio(dict):
+        def save(self):
+            pass
+
+    monkeypatch.setattr("mutagen.easyid3.EasyID3", lambda _path: FakeAudio())
+
+    result = apply_tags(
+        source,
+        TrackTags(artist="Artist/Name", title="Song: Edit"),
+    )
+
+    assert result == tmp_path / "Artist_Name - Song_ Edit.mp3"
+    assert result.exists()
+    assert not source.exists()
 
 
 def test_backend_selection_prefers_openai_then_anthropic_env_keys(monkeypatch):
@@ -216,6 +272,7 @@ def test_codex_auth_error_disables_enrichment(run):
         stderr="Codex failed\nNot logged in; run codex login",
     )
     enricher = Enricher()
+    enricher.use_backend("codex")
 
     assert enricher._ask_codex("prompt") is None
     assert not enricher.enabled
@@ -253,6 +310,7 @@ def test_claude_error_surfaces_structured_result(run):
         stderr="",
     )
     enricher = Enricher()
+    enricher.use_backend("claude")
 
     assert enricher._ask_claude("prompt") is None
     assert enricher.last_error == (
@@ -270,7 +328,154 @@ def test_claude_auth_error_disables_enrichment(run):
         stderr="",
     )
     enricher = Enricher()
+    enricher.use_backend("claude")
 
     assert enricher._ask_claude("prompt") is None
     assert not enricher.enabled
     assert "not logged in to Claude" in enricher.last_error
+
+
+@patch("transmute.enrich.subprocess.run", side_effect=FileNotFoundError)
+def test_missing_claude_cli_is_normalized(run):
+    enricher = Enricher()
+    enricher.use_backend("claude")
+
+    assert enricher._ask_claude("prompt") is None
+    assert not enricher.enabled
+    assert "claude CLI not found" in enricher.last_error
+    run.assert_called_once()
+
+
+def test_lookup_rejects_incomplete_metadata(monkeypatch):
+    enricher = Enricher()
+    enricher.use_backend("codex")
+    monkeypatch.setattr(
+        enricher,
+        "_ask_codex",
+        lambda _prompt: json.dumps({"artist": "Artist", "title": "Song"}),
+    )
+
+    tags = enricher.lookup(
+        title="Song",
+        uploader="Artist",
+        duration=180,
+        url="https://example.com/song",
+    )
+
+    assert tags is None
+    assert "metadata reply missing fields" in enricher.last_error
+
+
+def test_lookup_rejects_unexpected_metadata_fields(monkeypatch):
+    payload = {
+        "kind": "original",
+        "based_on": None,
+        "artist": "Artist",
+        "title": "Song",
+        "album": None,
+        "album_artist": None,
+        "year": None,
+        "genre": None,
+        "confidence": "high",
+        "explanation": "extra prose",
+    }
+    enricher = Enricher()
+    enricher.use_backend("codex")
+    monkeypatch.setattr(enricher, "_ask_codex", lambda _prompt: json.dumps(payload))
+
+    tags = enricher.lookup(
+        title="Song",
+        uploader="Artist",
+        duration=180,
+        url="https://example.com/song",
+    )
+
+    assert tags is None
+    assert "unexpected fields: explanation" in enricher.last_error
+
+
+def test_lookup_normalizes_integer_year_and_embedded_json(monkeypatch):
+    payload = {
+        "kind": "original",
+        "based_on": None,
+        "artist": "Artist",
+        "title": "Song",
+        "album": None,
+        "album_artist": None,
+        "year": 2026,
+        "genre": "Electronic",
+        "confidence": "high",
+    }
+    enricher = Enricher()
+    enricher.use_backend("codex")
+    monkeypatch.setattr(
+        enricher,
+        "_ask_codex",
+        lambda _prompt: f"result follows\n{json.dumps(payload)}\nfinished",
+    )
+
+    tags = enricher.lookup(
+        title="Song",
+        uploader="Artist",
+        duration=180,
+        url="https://example.com/song",
+    )
+
+    assert tags.year == "2026"
+    assert enricher.last_error is None
+
+
+def test_lookup_errors_are_thread_local():
+    enricher = Enricher()
+    barrier = Barrier(2)
+    observed = {}
+
+    def set_error(name):
+        enricher.last_error = name
+        barrier.wait()
+        observed[name] = enricher.last_error
+
+    first = Thread(target=set_error, args=("first",))
+    second = Thread(target=set_error, args=("second",))
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+
+    assert observed == {"first": "first", "second": "second"}
+    assert enricher.last_error is None
+
+
+def test_provider_errors_redact_active_key():
+    enricher = Enricher()
+    key = "sk-proj-secret-value"
+    enricher.set_api_key(key)
+
+    message = enricher._provider_error(RuntimeError(f"request failed for {key}"))
+
+    assert key not in message
+    assert "[redacted]" in message
+
+
+def test_provider_errors_redact_rotated_key_shape():
+    enricher = Enricher()
+    old_key = "sk-proj-old-secret-value"
+    enricher.set_api_key("sk-proj-current-secret-value")
+
+    message = enricher._provider_error(RuntimeError(f"request failed for {old_key}"))
+
+    assert old_key not in message
+    assert "[redacted]" in message
+
+
+def test_anthropic_continuation_limit_is_bounded(monkeypatch):
+    response = SimpleNamespace(stop_reason="pause_turn", content=[])
+    create = Mock(return_value=response)
+    client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    enricher = Enricher()
+    enricher.set_api_key("sk-ant-api03-test")
+    monkeypatch.setattr(enricher, "_get_anthropic_client", lambda: client)
+
+    assert enricher._ask_anthropic_api("prompt") is None
+    assert "continuation limit" in enricher.last_error
+    assert create.call_count == 4

@@ -19,6 +19,7 @@ def build_key_bindings(app) -> KeyBindings:
         lambda: app.modal is None and app.dir_picker is None and not app.help_open
     )
     has_actionable = Condition(lambda: bool(app._actionable())) & no_overlay
+    has_selection = Condition(app.has_selection)
     sel_is_err = (
         Condition(lambda: app._sel_kind() == "err" and not app.input_buffer.text)
         & no_overlay
@@ -31,7 +32,7 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         app._move_sel(-1)
 
-    @kb.add("down", filter=has_actionable & Condition(lambda: app.sel is not None))
+    @kb.add("down", filter=has_actionable & has_selection)
     def _(event):
         app._move_sel(1)
 
@@ -54,10 +55,7 @@ def build_key_bindings(app) -> KeyBindings:
         if app.modal:
             app.close_modal()
             return
-        app.sel = None
-        app.hint_buffer.reset()
-        app._update_focus()
-        app.refresh()
+        app.clear_selection()
 
     @kb.add("enter", filter=sel_is_err & has_focus(app.input_buffer))
     def _(event):
@@ -72,12 +70,9 @@ def build_key_bindings(app) -> KeyBindings:
         if app.dir_picker is not None:
             app.close_dir_picker()
             return
-        if app.sel is not None:
-            app.sel = None
-            app.hint_buffer.reset()
-            app._update_focus()
+        if app.has_selection():
+            app.clear_selection()
             app.clear_input_notice()
-            app.refresh()
             app._last_ctrl_c = now
             return
         if app.input_buffer.text:

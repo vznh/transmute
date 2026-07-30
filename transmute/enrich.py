@@ -7,8 +7,10 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 ANTHROPIC_MODEL = "claude-opus-4-8"
 OPENAI_MODEL = "gpt-5.6-terra"
@@ -106,7 +108,8 @@ HINT_SUFFIX = """
 USER HINT: the user provided this additional context — treat it as the most reliable \
 signal and re-verify against it: {hint}"""
 
-JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+TrackKind = Literal["original", "reupload", "derivative"]
+Confidence = Literal["high", "medium", "low"]
 
 
 @dataclass
@@ -117,9 +120,9 @@ class TrackTags:
     album_artist: str | None = None
     year: str | None = None
     genre: str | None = None
-    kind: str | None = None  # original | reupload | derivative
-    based_on: str | None = None  # for derivatives: the source artist/song
-    confidence: str | None = None  # high | medium | low (artist attribution)
+    kind: TrackKind | None = None
+    based_on: str | None = None
+    confidence: Confidence | None = None
 
 
 class Enricher:
@@ -131,6 +134,8 @@ class Enricher:
     """
 
     def __init__(self) -> None:
+        self._error_state = threading.local()
+        self._client_lock = threading.RLock()
         self.enabled = True
         self.last_error: str | None = None
         self._api_key: str | None = None
@@ -166,12 +171,42 @@ class Enricher:
         return BACKEND_LABELS[self.backend]
 
     @property
+    def backend(self) -> str:
+        with self._client_lock:
+            return self._backend
+
+    @backend.setter
+    def backend(self, value: str) -> None:
+        with self._client_lock:
+            self._backend = value
+
+    @property
+    def enabled(self) -> bool:
+        with self._client_lock:
+            return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        with self._client_lock:
+            self._enabled = value
+
+    @property
+    def last_error(self) -> str | None:
+        return getattr(self._error_state, "value", None)
+
+    @last_error.setter
+    def last_error(self, value: str | None) -> None:
+        self._error_state.value = value
+
+    @property
     def has_api_key(self) -> bool:
-        return self._api_key is not None
+        with self._client_lock:
+            return self._api_key is not None
 
     @property
     def api_key_source(self) -> str | None:
-        return self._api_key_source
+        with self._client_lock:
+            return self._api_key_source
 
     def use_backend(self, backend: str) -> None:
         self.backend = backend
@@ -188,11 +223,12 @@ class Enricher:
         raise ValueError("key must start with sk- (OpenAI) or sk-ant- (Anthropic)")
 
     def _set_api_key(self, key: str, provider: str, *, source: str) -> None:
-        self._api_key = key.strip()
-        self._api_provider = provider
-        self._api_key_source = source
-        self._anthropic_client = None
-        self._openai_client = None
+        with self._client_lock:
+            self._api_key = key.strip()
+            self._api_provider = provider
+            self._api_key_source = source
+            self._anthropic_client = None
+            self._openai_client = None
         self.use_backend(provider)
 
     def set_api_key(self, key: str) -> None:
@@ -201,33 +237,38 @@ class Enricher:
         self._set_api_key(key, provider, source="entered")
 
     def clear_api_key(self) -> None:
-        self._api_key = None
-        self._api_provider = None
-        self._api_key_source = None
-        self._anthropic_client = None
-        self._openai_client = None
+        with self._client_lock:
+            self._api_key = None
+            self._api_provider = None
+            self._api_key_source = None
+            self._anthropic_client = None
+            self._openai_client = None
         self._select_default_backend()
 
     def use_api_key(self) -> bool:
-        if not self._api_provider:
+        with self._client_lock:
+            provider = self._api_provider
+        if not provider:
             self.last_error = "no API key configured — run /key"
             return False
-        self.use_backend(self._api_provider)
+        self.use_backend(provider)
         return True
 
     def _get_anthropic_client(self):
-        if self._anthropic_client is None:
-            import anthropic
+        with self._client_lock:
+            if self._anthropic_client is None:
+                import anthropic
 
-            self._anthropic_client = anthropic.Anthropic(api_key=self._api_key)
-        return self._anthropic_client
+                self._anthropic_client = anthropic.Anthropic(api_key=self._api_key)
+            return self._anthropic_client
 
     def _get_openai_client(self):
-        if self._openai_client is None:
-            from openai import OpenAI
+        with self._client_lock:
+            if self._openai_client is None:
+                from openai import OpenAI
 
-            self._openai_client = OpenAI(api_key=self._api_key)
-        return self._openai_client
+                self._openai_client = OpenAI(api_key=self._api_key)
+            return self._openai_client
 
     def lookup(
         self,
@@ -255,41 +296,40 @@ class Enricher:
         )
         if hint:
             prompt += HINT_SUFFIX.format(hint=hint)
-        if self.backend == "codex":
+        try:
+            with self._client_lock:
+                backend = self._backend
+                api_client = (
+                    self._get_openai_client()
+                    if backend == "openai_api"
+                    else (
+                        self._get_anthropic_client()
+                        if backend == "anthropic_api"
+                        else None
+                    )
+                )
+        except Exception as error:  # noqa: BLE001
+            self.last_error = self._provider_error(error)
+            return None
+        if backend == "codex":
             text = self._ask_codex(prompt)
-        elif self.backend == "claude":
+        elif backend == "claude":
             text = self._ask_claude(prompt)
-        elif self.backend == "openai_api":
-            text = self._ask_openai_api(prompt)
-        elif self.backend == "anthropic_api":
-            text = self._ask_anthropic_api(prompt)
+        elif backend == "openai_api":
+            text = self._ask_openai_api(prompt, api_client)
+        elif backend == "anthropic_api":
+            text = self._ask_anthropic_api(prompt, api_client)
         else:
             self.last_error = "no enrichment provider — run /key or /login"
             return None
         if text is None:
             return None
 
-        match = JSON_RE.search(text)
-        if not match:
-            self.last_error = "no JSON in model reply"
-            return None
         try:
-            data = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            self.last_error = "unparseable JSON in model reply"
+            return _parse_track_tags(text)
+        except ValueError as error:
+            self.last_error = str(error)
             return None
-
-        return TrackTags(
-            artist=data.get("artist"),
-            title=data.get("title"),
-            album=data.get("album"),
-            album_artist=data.get("album_artist"),
-            year=str(data["year"]) if data.get("year") else None,
-            genre=data.get("genre"),
-            kind=data.get("kind"),
-            based_on=data.get("based_on"),
-            confidence=data.get("confidence"),
-        )
 
     def _ask_codex(self, prompt: str) -> str | None:
         """Run a read-only web lookup through Codex with ChatGPT subscription auth."""
@@ -336,7 +376,7 @@ class Enricher:
                     check=False,
                 )
         except FileNotFoundError:
-            self.enabled = False
+            self._disable_backend("codex")
             self.last_error = "codex CLI not found — install Codex or choose /enrich claude"
             return None
         except subprocess.TimeoutExpired:
@@ -350,7 +390,7 @@ class Enricher:
                 marker in err_lower
                 for marker in ("log in", "logged in", "authent", "unauthorized")
             ):
-                self.enabled = False
+                self._disable_backend("codex")
                 self.last_error = (
                     "not logged in to Codex — run /login codex "
                     "and choose your ChatGPT account"
@@ -405,6 +445,10 @@ class Enricher:
                 env=env,
                 check=False,
             )
+        except FileNotFoundError:
+            self._disable_backend("claude")
+            self.last_error = "claude CLI not found — install Claude or choose /enrich codex"
+            return None
         except subprocess.TimeoutExpired:
             self.last_error = "claude CLI timed out"
             return None
@@ -424,7 +468,7 @@ class Enricher:
                 marker in err_lower
                 for marker in ("log in", "logged in", "authent", "invalid api key")
             ):
-                self.enabled = False
+                self._disable_backend("claude")
                 self.last_error = (
                     "not logged in to Claude — run `claude`, type /login, "
                     "and choose your subscription"
@@ -441,12 +485,13 @@ class Enricher:
             return None
         return data.get("result", "")
 
-    def _ask_openai_api(self, prompt: str) -> str | None:
+    def _ask_openai_api(self, prompt: str, client=None) -> str | None:
         """Run the lookup through the OpenAI Responses API."""
         import openai
 
         try:
-            response = self._get_openai_client().responses.create(
+            client = client or self._get_openai_client()
+            response = client.responses.create(
                 model=OPENAI_MODEL,
                 input=prompt,
                 tools=[{"type": "web_search"}],
@@ -462,19 +507,19 @@ class Enricher:
                 store=False,
             )
         except openai.AuthenticationError:
-            self.enabled = False
+            self._disable_backend("openai_api")
             self.last_error = "invalid OpenAI API key — run /key to replace it"
             return None
         except Exception as e:  # noqa: BLE001
-            self.last_error = str(e)[:200]
+            self.last_error = self._provider_error(e)
             return None
         return response.output_text
 
-    def _ask_anthropic_api(self, prompt: str) -> str | None:
+    def _ask_anthropic_api(self, prompt: str, client=None) -> str | None:
         """Run the lookup through the Anthropic SDK (API key / Console billing)."""
         import anthropic
 
-        client = self._get_anthropic_client()
+        client = client or self._get_anthropic_client()
         messages = [{"role": "user", "content": prompt}]
         tools = [
             {
@@ -502,7 +547,8 @@ class Enricher:
             for _ in range(MAX_CONTINUATIONS):
                 if response.stop_reason != "pause_turn":
                     break
-                messages = messages + [
+                messages = [
+                    *messages,
                     {"role": "assistant", "content": response.content}
                 ]
                 response = client.messages.create(
@@ -513,19 +559,107 @@ class Enricher:
                     tools=tools,
                     messages=messages,
                 )
+            if response.stop_reason == "pause_turn":
+                self.last_error = "Anthropic lookup exceeded its continuation limit"
+                return None
         except anthropic.AuthenticationError:
-            self.enabled = False
+            self._disable_backend("anthropic_api")
             self.last_error = "invalid Anthropic API key — run /key to replace it"
             return None
         except Exception as e:  # noqa: BLE001
             if "Could not resolve authentication" in str(e):
-                self.enabled = False
+                self._disable_backend("anthropic_api")
                 self.last_error = "no Anthropic API key found — run /key"
             else:
-                self.last_error = str(e)[:200]
+                self.last_error = self._provider_error(e)
             return None
 
         return "".join(b.text for b in response.content if b.type == "text")
+
+    def _disable_backend(self, backend: str) -> None:
+        with self._client_lock:
+            if self._backend == backend:
+                self._enabled = False
+
+    def _provider_error(self, error: Exception) -> str:
+        lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+        message = lines[0] if lines else error.__class__.__name__
+        with self._client_lock:
+            key = self._api_key
+        if key:
+            message = message.replace(key, "[redacted]")
+        message = re.sub(r"\bsk-[A-Za-z0-9_.-]{8,}", "[redacted]", message)
+        return message[:200]
+
+
+def _parse_track_tags(text: str) -> TrackTags:
+    data = _first_json_object(text)
+    required = set(OUTPUT_SCHEMA["required"])
+    missing = sorted(required - data.keys())
+    if missing:
+        raise ValueError(f"metadata reply missing fields: {', '.join(missing)}")
+    unexpected = sorted(data.keys() - required)
+    if unexpected:
+        raise ValueError(
+            f"metadata reply has unexpected fields: {', '.join(unexpected)}"
+        )
+
+    artist = _required_string(data, "artist")
+    title = _required_string(data, "title")
+    kind = data["kind"]
+    if kind not in ("original", "reupload", "derivative"):
+        raise ValueError("metadata reply has invalid kind")
+    confidence = data["confidence"]
+    if confidence not in ("high", "medium", "low"):
+        raise ValueError("metadata reply has invalid confidence")
+
+    year = data["year"]
+    if year is not None and type(year) not in (str, int):
+        raise ValueError("metadata reply has invalid year")
+
+    return TrackTags(
+        artist=artist,
+        title=title,
+        album=_optional_string(data, "album"),
+        album_artist=_optional_string(data, "album_artist"),
+        year=str(year) if year is not None else None,
+        genre=_optional_string(data, "genre"),
+        kind=kind,
+        based_on=_optional_string(data, "based_on"),
+        confidence=confidence,
+    )
+
+
+def _first_json_object(text: str) -> dict:
+    decoder = json.JSONDecoder()
+    found_start = False
+    for match in re.finditer(r"\{", text):
+        found_start = True
+        try:
+            value, _ = decoder.raw_decode(text[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    if found_start:
+        raise ValueError("unparseable JSON in model reply")
+    raise ValueError("no JSON in model reply")
+
+
+def _required_string(data: dict, field: str) -> str:
+    value = data[field]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"metadata reply has invalid {field}")
+    return value.strip()
+
+
+def _optional_string(data: dict, field: str) -> str | None:
+    value = data[field]
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"metadata reply has invalid {field}")
+    if value is None:
+        return None
+    return value.strip() or None
 
 
 def _safe_filename(name: str) -> str:
@@ -533,7 +667,7 @@ def _safe_filename(name: str) -> str:
 
 
 def apply_tags(path: Path, tags: TrackTags) -> Path:
-    """Write ID3 tags into the MP3 (keeps embedded cover art) and rename to Artist - Title.mp3."""
+    """Update owned ID3 fields and rename without replacing an existing file."""
     from mutagen.easyid3 import EasyID3
     from mutagen.id3 import ID3NoHeaderError
 
