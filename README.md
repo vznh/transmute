@@ -51,6 +51,12 @@ Recent completed and failed tracks are restored when Transmute opens; restored
 failures can be retried and restored low-confidence entries can receive hints just
 like entries from the current session. `/list` includes recent persisted tracks.
 
+Your output directory and bitrate also persist. `/out` and `/quality` are saved to
+`~/.transmute/settings.json` and restored on the next launch. A runtime command in
+the current session overrides the saved file, which overrides the built-in defaults
+(`~/Downloads`, 320kbps); a missing or unreadable settings file falls back to those
+defaults without overwriting it.
+
 Prompt recall is stored in `~/.transmute/history`, and download activity is stored
 in `~/.transmute/activity.sqlite3`. URLs and metadata remain local and unencrypted,
 with owner-only permissions on the storage directory and files. `/clear` removes
@@ -120,6 +126,7 @@ as `just run`, `just test`, `just lint`, and `just check`.
 - `transmute/widgets.py` — reusable prompt components
 - `transmute/style.py` — theme and user-facing UI constants
 - `transmute/config.py` — settings and shared operational constants
+- `transmute/settings.py` — persistent output directory and bitrate storage
 - `transmute/history.py` — persistent download activity storage
 - `transmute/downloader.py` — local yt-dlp/ffmpeg service
 - `transmute/enrich.py` — provider selection, web research, and ID3 tagging
