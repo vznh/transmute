@@ -558,8 +558,13 @@ main
 - **DEP14 — Keep the version single-sourced.** `transmute/__init__.py` owns
   `__version__`; `pyproject.toml` and the Homebrew formula are derived from it.
   Do not reintroduce a second version literal.
-- **DEP15 — Keep the release tag and the version in step.** A release tag is the
-  version with a `v` prefix; `release.yml` fails the publish when they disagree.
+- **DEP15 — Keep the release tag and the version in step.** Tags are bare
+  versions such as `0.2a`. `release.yml` compares the tag to the built artifact
+  as PEP 440 versions and fails the publish when they disagree, so a `0.2a` tag
+  matches the normalised `0.2a0` filename but a `0.3a` tag does not.
+- **DEP16 — Treat prerelease versions as user-visible.** An alpha version is
+  normalised by PyPI (`0.2a` becomes `0.2a0`) and is skipped by default
+  resolvers, so install documentation must pin it explicitly.
 
 ## 15. Change and review discipline
 

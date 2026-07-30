@@ -29,6 +29,7 @@ except ModuleNotFoundError:  # Python 3.10 has no tomllib.
     import tomli as tomllib  # type: ignore[no-redef]
 
 from packaging.markers import Marker
+from packaging.version import Version
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATH = REPO_ROOT / "uv.lock"
@@ -138,23 +139,25 @@ def fetch_sha256(url: str) -> str | None:
     return digest.hexdigest()
 
 
-def github_tarball_url(version: str) -> str:
+def github_tarball_url(tag: str) -> str:
     """The source tarball GitHub generates for a release tag.
 
     This lets the tap ship before the PyPI project exists, since a tag is all
-    Homebrew needs to fetch and verify a source archive.
+    Homebrew needs to fetch and verify a source archive. The tag is used
+    verbatim because this repository tags bare versions, such as `0.2a`.
     """
-    return f"https://github.com/vznh/transmute/archive/refs/tags/v{version}.tar.gz"
+    return f"https://github.com/vznh/transmute/archive/refs/tags/{tag}.tar.gz"
 
 
-def github_tarball(version: str) -> tuple[str, str] | None:
-    url = github_tarball_url(version)
+def github_tarball(tag: str) -> tuple[str, str] | None:
+    url = github_tarball_url(tag)
     sha256 = fetch_sha256(url)
     return None if sha256 is None else (url, sha256)
 
 
 def fetch_pypi_sdist(version: str) -> tuple[str, str] | None:
-    url = f"https://pypi.org/pypi/transmute-cli/{version}/json"
+    # PyPI addresses releases by their normalised version, so "0.2a" is "0.2a0".
+    url = f"https://pypi.org/pypi/transmute-cli/{Version(version)}/json"
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
             payload = json.load(response)
@@ -210,7 +213,11 @@ def render_formula(version: str, url: str, sha256: str, packages: list[dict[str,
   test do
     # Downloading real media needs the network and a source site, so the test
     # only proves the console script and its virtualenv resolve and run.
-    assert_match "transmute #{{version}}", shell_output("#{{bin}}/transmute --version")
+    #
+    # The literal version is asserted rather than Homebrew's `version`, which is
+    # parsed from the url: PyPI normalises "0.2a" to "0.2a0" in the filename
+    # while the console script reports __version__ verbatim.
+    assert_match "transmute {version}", shell_output("#{{bin}}/transmute --version")
     assert_match "usage: transmute", shell_output("#{{bin}}/transmute --help")
   end
 end
@@ -226,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         default="pypi",
         help="where the formula downloads Transmute itself from (default: pypi)",
     )
+    parser.add_argument("--tag", default=None, help="git tag for --source github; defaults to the version")
     parser.add_argument("--url", default=None, help="source URL; overrides --source")
     parser.add_argument("--sha256", default=None, help="source sha256; overrides --source")
     parser.add_argument("--write", action="store_true", help=f"write to {FORMULA_PATH.name}")
@@ -239,8 +247,9 @@ def main(argv: list[str] | None = None) -> int:
             url, sha256 = args.url, args.sha256
         else:
             if args.source == "github":
-                released = github_tarball(version)
-                missing = f"no GitHub release tarball for tag v{version}"
+                tag = args.tag or version
+                released = github_tarball(tag)
+                missing = f"no GitHub release tarball for tag {tag}"
             else:
                 released = fetch_pypi_sdist(version)
                 missing = f"transmute-cli {version} is not on PyPI yet"

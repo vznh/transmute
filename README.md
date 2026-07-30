@@ -37,9 +37,12 @@ brew install vznh/transmute/transmute
 With Python tooling instead — ffmpeg is not included, so install it separately:
 
 ```sh
-uv tool install transmute-cli   # or: pipx install transmute-cli
+uv tool install "transmute-cli==0.2a0"   # or: pipx install "transmute-cli==0.2a0"
 brew install ffmpeg
 ```
+
+The version is pinned because Transmute is still an alpha, and `uv` and `pip`
+skip prereleases unless you ask for one by name.
 
 Either way, start it by running `transmute`. Check what you have with
 `transmute --version`.

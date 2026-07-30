@@ -65,9 +65,20 @@ def test_binary_only_packages_are_detected(generator, closure):
     assert compiled == {"jiter", "pydantic-core"}
 
 
-def test_github_tarball_url_uses_the_v_prefixed_tag(generator):
-    # The release workflow tags v<version>; the formula must ask for the same ref.
-    assert generator.github_tarball_url("1.2.3").endswith("/refs/tags/v1.2.3.tar.gz")
+def test_github_tarball_url_uses_the_tag_verbatim(generator):
+    # This repository tags bare versions, so no prefix may be invented.
+    assert generator.github_tarball_url("0.2a").endswith("/refs/tags/0.2a.tar.gz")
+
+
+def test_formula_test_block_asserts_the_unnormalised_version(generator, closure):
+    # PyPI names the artifact "0.2a0" so Homebrew's own `version` would be
+    # "0.2a0", but the console script prints __version__ verbatim as "0.2a".
+    formula = generator.render_formula(
+        "0.2a", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
+    )
+
+    assert 'assert_match "transmute 0.2a"' in formula
+    assert "#{version}" not in formula
 
 
 def test_explicit_source_is_used_verbatim(generator, closure):

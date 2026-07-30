@@ -35,17 +35,21 @@ These steps need account access and cannot be done from this repository.
 1. Bump `__version__` in `transmute/__init__.py`. It is the only place the
    version is written; `pyproject.toml` reads it.
 
-2. Tag and push. The tag must be the version with a `v` prefix, because
-   `release.yml` checks the tag against the built artifact and fails on a
-   mismatch:
+2. Tag and push. Tags are bare versions, matching the existing `0.1a`:
 
    ```sh
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag 0.2a
+   git push origin 0.2a
    ```
 
+   `release.yml` compares the tag to the built artifact as PEP 440 versions and
+   fails on a mismatch. That comparison is deliberately not a string match:
+   packaging normalises `0.2a` to `0.2a0`, so the tag and the filename
+   `transmute_cli-0.2a0.tar.gz` differ in text while naming one release.
+
    The workflow runs the suite on Python 3.10 through 3.13, publishes to PyPI,
-   and attaches the sdist to a GitHub release.
+   and attaches the sdist to a GitHub release, marked as a prerelease when the
+   version is one.
 
 3. Regenerate the formula once the release is on PyPI, so it picks up the real
    sdist URL and sha256:
@@ -64,6 +68,7 @@ These steps need account access and cannot be done from this repository.
    uv run python packaging/homebrew/generate_formula.py --source github --write
    ```
 
+   The tag is taken verbatim from `__version__`; pass `--tag` when they differ.
    Both sources build the same package; PyPI is preferred once the project
    exists because its sdist is the artifact the release workflow verified.
 
