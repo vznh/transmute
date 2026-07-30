@@ -41,6 +41,10 @@ INIT_PATH = REPO_ROOT / "transmute" / "__init__.py"
 
 ROOT_PACKAGE = "transmute-cli"
 
+# Kept in step with `license` in pyproject.toml; `brew audit` compares the
+# formula's SPDX expression against the upstream package metadata.
+LICENSE_EXPRESSION = "GPL-3.0-or-later"
+
 # The formula pins this interpreter, so markers are resolved against it rather
 # than against whatever Python happens to be running this script.
 PYTHON_VERSION = "3.13"
@@ -202,6 +206,7 @@ def render_formula(version: str, url: str, sha256: str, packages: list[dict[str,
   homepage "https://github.com/vznh/transmute"
   url "{url}"
   sha256 "{sha256}"
+  license "{LICENSE_EXPRESSION}"
   head "https://github.com/vznh/transmute.git", branch: "main"
 
 {build_deps}  # Transmute shells out to ffmpeg for audio extraction and conversion.

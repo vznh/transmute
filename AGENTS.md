@@ -565,6 +565,13 @@ main
 - **DEP16 — Treat prerelease versions as user-visible.** An alpha version is
   normalised by PyPI (`0.2a` becomes `0.2a0`) and is skipped by default
   resolvers, so install documentation must pin it explicitly.
+- **DEP17 — Keep the licence GPL-compatible.** `enrich.py` imports mutagen,
+  which is GPL-2.0-or-later, so the distributed combination must stay
+  copyleft. `pyproject.toml`, `LICENSE`, and the generated formula must agree;
+  relicensing under permissive terms requires first removing every copyleft
+  dependency.
+- **DEP18 — Check the licence of a new dependency.** Record its SPDX expression
+  and confirm compatibility with `DEP17` before adding it.
 
 ## 15. Change and review discipline
 

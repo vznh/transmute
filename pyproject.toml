@@ -4,6 +4,11 @@ dynamic = ["version"]
 description = "Convert YouTube or SoundCloud links into rich MP3s."
 readme = "README.md"
 requires-python = ">=3.10"
+# Copyleft is required, not chosen: Transmute imports mutagen for ID3 writes and
+# mutagen is GPL-2.0-or-later, so the distributed combination cannot carry more
+# permissive terms.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 keywords = ["youtube", "soundcloud", "mp3", "id3", "yt-dlp", "tui"]
 classifiers = [
     "Development Status :: 3 - Alpha",

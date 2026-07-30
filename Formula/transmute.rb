@@ -5,6 +5,7 @@ class Transmute < Formula
   homepage "https://github.com/vznh/transmute"
   url "https://github.com/vznh/transmute/archive/refs/tags/0.2a.tar.gz"
   sha256 "18378aa757680aad6b50695515513eac4075139223769232cf32f88dcc3e8b88"
+  license "GPL-3.0-or-later"
   head "https://github.com/vznh/transmute.git", branch: "main"
 
   # jiter, pydantic-core ship no pure-Python wheel, so pip compiles

@@ -25,9 +25,6 @@ rather than failing later mid-download.
 
 ## Install
 
-> The Homebrew tap and the PyPI release land with the first tagged version. Until
-> then, use the [from a checkout](#from-a-checkout) instructions below.
-
 Homebrew pulls in ffmpeg for you:
 
 ```sh
@@ -49,6 +46,9 @@ brew install ffmpeg
 
 The version is pinned because Transmute is still an alpha, and `uv` and `pip`
 skip prereleases unless you ask for one by name.
+
+> `transmute-cli` is not on PyPI yet, so this path does not work until the first
+> published release. Homebrew and [from a checkout](#from-a-checkout) both do.
 
 Either way, start it by running `transmute`. Check what you have with
 `transmute --version`.
@@ -218,3 +218,15 @@ Tests
 - `tests/test_settings.py` — settings round-trip, rejection, and fallback
 - `tests/test_history.py` — activity storage, retry/hint claiming, session recovery
 - `tests/test_packaging.py` — Homebrew resource closure derived from `uv.lock`
+
+## License
+
+Transmute is licensed under the [GNU General Public License v3.0 or later](LICENSE).
+
+Copyright (C) 2026 vznh.
+
+The licence is copyleft because a dependency requires it, not by preference:
+`transmute/enrich.py` imports [mutagen](https://github.com/quodlibet/mutagen)
+to write ID3 frames, and mutagen is GPL-2.0-or-later, so the distributed
+combination cannot carry more permissive terms. ffmpeg is a separate program
+invoked as a subprocess and does not affect this.
