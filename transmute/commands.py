@@ -9,6 +9,24 @@ from pathlib import Path
 
 from .config import QUALITIES
 
+# The command reference shown by /help. Rendered as a full-screen takeover
+# (see App.open_help) rather than streamed through the transient message log,
+# so no rows get clipped.
+HELP_ROWS = [
+    ("/out [dir]", "set output dir — arg is quick; no arg opens the picker"),
+    ("/quality [128|192|256|320]", "show or set MP3 bitrate (kbps)"),
+    ("/enrich [codex|claude|api|on|off]", "choose or toggle metadata enrichment"),
+    ("/key [clear]", "securely set or clear one API key"),
+    ("/list", "show all tracks from this session"),
+    ("/retry", "requeue all failed downloads"),
+    ("/login [codex|claude]", "log in to a subscription provider"),
+    ("/logout [codex|claude]", "log out of a subscription provider"),
+    ("/clear", "clear history and messages"),
+    ("/help", "show this command reference"),
+    ("/quit", "exit (or ctrl-d / double ctrl-c)"),
+    ("↑/↓", "select failed or low-confidence entries in History"),
+]
+
 
 class Commands:
     def __init__(self, app) -> None:
@@ -27,24 +45,7 @@ class Commands:
             self.app.msg("class:err", f"unknown command: /{name}  (/help for commands)")
 
     def cmd_help(self, _arg: str) -> None:
-        rows = [
-            ("/out [dir]", "set output dir — arg is quick; no arg opens the picker"),
-            ("/quality [128|192|256|320]", "show or set MP3 bitrate (kbps)"),
-            (
-                "/enrich [codex|claude|api|on|off]",
-                "choose or toggle metadata enrichment",
-            ),
-            ("/key [clear]", "securely set or clear one API key"),
-            ("/list", "show all tracks from this session"),
-            ("/retry", "requeue all failed downloads"),
-            ("/login [codex|claude]", "log in to a subscription provider"),
-            ("/logout [codex|claude]", "log out of a subscription provider"),
-            ("/clear", "clear history and messages"),
-            ("/quit", "exit (or ctrl-d / double ctrl-c)"),
-            ("↑/↓", "select failed or low-confidence entries in History"),
-        ]
-        for cmd, desc in rows:
-            self.app.msg("class:dim", f"{cmd:<28}{desc}")
+        self.app.open_help()
 
     def _set_out_dir(self, text: str) -> None:
         path = Path(text).expanduser()

@@ -14,8 +14,10 @@ def _exit_shortcut() -> str:
 
 def build_key_bindings(app) -> KeyBindings:
     kb = KeyBindings()
-    # No modal and no directory picker: the plain URL-input state.
-    no_overlay = Condition(lambda: app.modal is None and app.dir_picker is None)
+    # No overlay of any kind: the plain URL-input state.
+    no_overlay = Condition(
+        lambda: app.modal is None and app.dir_picker is None and not app.help_open
+    )
     has_actionable = Condition(lambda: bool(app._actionable())) & no_overlay
     sel_is_err = (
         Condition(lambda: app._sel_kind() == "err" and not app.input_buffer.text)
@@ -43,6 +45,9 @@ def build_key_bindings(app) -> KeyBindings:
 
     @kb.add("escape", eager=True)
     def _(event):
+        if app.help_open:
+            app.close_help()
+            return
         if app.dir_picker is not None:
             app.close_dir_picker()
             return
@@ -61,6 +66,9 @@ def build_key_bindings(app) -> KeyBindings:
     @kb.add("c-c")
     def _(event):
         now = time.monotonic()
+        if app.help_open:
+            app.close_help()
+            return
         if app.dir_picker is not None:
             app.close_dir_picker()
             return
@@ -95,5 +103,12 @@ def build_key_bindings(app) -> KeyBindings:
     @kb.add("c-d")
     def _(event):
         event.app.exit()
+
+    # While help is open the input line is inert: swallow every other key so it
+    # can't edit the URL buffer behind the overlay. escape/c-c/c-d are matched by
+    # their specific bindings above and take priority over this catch-all.
+    @kb.add("<any>", filter=Condition(lambda: app.help_open))
+    def _(event):
+        pass
 
     return kb
