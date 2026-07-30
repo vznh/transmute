@@ -5,10 +5,34 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import Settings
 
 URL_RE = re.compile(r"https?://(?:(?!https?://)\S)+")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# (substring of the lowercased yt-dlp message, short human message, retryable)
+# Non-retryable means retrying the same URL cannot succeed without the user
+# changing something first.
+_ERROR_PATTERNS: list[tuple[str, str, bool]] = [
+    ("unsupported url", "", False),  # message built from the domain, see below
+    ("is not a valid url", "not a valid link", False),
+    ("private video", "video is private", False),
+    ("video unavailable", "video unavailable", False),
+    ("has been removed", "video was removed", False),
+    ("no longer available", "video is no longer available", False),
+    ("sign in to confirm", "requires login — needs browser cookies", False),
+    ("login required", "requires login — needs browser cookies", False),
+    ("not available in your country", "not available in your region", False),
+    ("ffprobe and ffmpeg not found", "ffmpeg missing — brew install ffmpeg", False),
+    ("timed out", "network error — timed out", True),
+    ("temporary failure in name resolution", "network error — DNS failed", True),
+    ("getaddrinfo failed", "network error — DNS failed", True),
+    ("connection", "network error — connection failed", True),
+    ("http error 5", "server error — try again later", True),
+    ("unable to download", "network error — download failed", True),
+]
 
 
 @dataclass
@@ -21,7 +45,42 @@ class Job:
     description: str | None = None
     tags: list[str] | None = None
     path: Path | None = None
-    error: str | None = None
+    error: str | None = None  # short human-readable summary
+    error_detail: str | None = None  # full untruncated message from yt-dlp
+    retryable: bool = True
+
+
+class _SilentLogger:
+    """Swallow yt-dlp's log output; even with quiet=True it prints errors to
+    stderr, which corrupts the full-screen TUI. Failures reach us as raised
+    exceptions instead."""
+
+    def debug(self, msg: str) -> None:
+        pass
+
+    def warning(self, msg: str) -> None:
+        pass
+
+    def error(self, msg: str) -> None:
+        pass
+
+
+def classify_error(e: Exception, url: str) -> tuple[str, str, bool]:
+    """Turn a raw yt-dlp exception into (summary, detail, retryable).
+
+    yt-dlp embeds ANSI color codes in its exception messages when it detects
+    a tty, so strip those before anything else.
+    """
+    detail = ANSI_RE.sub("", str(e)).strip()
+    low = detail.lower()
+    for needle, summary, retryable in _ERROR_PATTERNS:
+        if needle in low:
+            if needle == "unsupported url":
+                domain = urlparse(url).netloc or url
+                summary = f"{domain} isn't a supported site"
+            return summary, detail, retryable
+    first = detail.split("\n")[0].removeprefix("ERROR: ").strip()[:120]
+    return first or "unknown error", detail, True
 
 
 def extract_urls(text: str) -> list[str]:
@@ -53,6 +112,8 @@ def download_job(job: Job, settings: Settings, on_progress=None) -> Job:
         "format": "bestaudio/best",
         "outtmpl": str(settings.out_dir / "%(uploader)s - %(title)s.%(ext)s"),
         "noplaylist": True,
+        "color": "never",  # keep ANSI codes out of exception messages
+        "logger": _SilentLogger(),
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
@@ -83,6 +144,6 @@ def download_job(job: Job, settings: Settings, on_progress=None) -> Job:
         job.status = "done"
     except Exception as e:  # noqa: BLE001
         job.status = "error"
-        job.error = str(e).split("\n")[0][:200]
+        job.error, job.error_detail, job.retryable = classify_error(e, job.url)
 
     return job
