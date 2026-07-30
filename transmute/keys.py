@@ -10,11 +10,15 @@ from prompt_toolkit.key_binding import KeyBindings
 
 def build_key_bindings(app) -> KeyBindings:
     kb = KeyBindings()
-    no_modal = Condition(lambda: app.modal is None)
-    has_actionable = Condition(lambda: bool(app._actionable())) & no_modal
+    # No modal and no directory picker: the plain URL-input state.
+    no_overlay = Condition(lambda: app.modal is None and app.dir_picker is None)
+    has_actionable = Condition(lambda: bool(app._actionable())) & no_overlay
     sel_is_err = (
         Condition(lambda: app._sel_kind() == "err" and not app.input_buffer.text)
-        & no_modal
+        & no_overlay
+    )
+    picker_confirm = Condition(
+        lambda: app.dir_picker is not None and app.dir_picker.stage == "confirm"
     )
 
     @kb.add("up", filter=has_actionable)
@@ -25,8 +29,19 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         app._move_sel(1)
 
+    @kb.add("y", filter=picker_confirm)
+    def _(event):
+        app._dir_confirm_create()
+
+    @kb.add("n", filter=picker_confirm)
+    def _(event):
+        app._dir_decline_create()
+
     @kb.add("escape", eager=True)
     def _(event):
+        if app.dir_picker is not None:
+            app.close_dir_picker()
+            return
         if app.modal:
             app.close_modal()
             return
@@ -42,6 +57,9 @@ def build_key_bindings(app) -> KeyBindings:
     @kb.add("c-c")
     def _(event):
         now = time.monotonic()
+        if app.dir_picker is not None:
+            app.close_dir_picker()
+            return
         if app.sel is not None:
             app.sel = None
             app.hint_buffer.reset()

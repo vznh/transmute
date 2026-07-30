@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 from .config import QUALITIES
-from .widgets import Modal
 
 
 class Commands:
@@ -28,7 +27,7 @@ class Commands:
 
     def cmd_help(self, _arg: str) -> None:
         rows = [
-            ("/out [dir]", "show or set the output directory"),
+            ("/out [dir]", "set output dir — arg is quick; no arg opens the picker"),
             ("/quality [128|192|256|320]", "show or set MP3 bitrate (kbps)"),
             ("/enrich [on|off]", "toggle web-search metadata enrichment"),
             ("/list", "show all tracks from this session"),
@@ -55,18 +54,15 @@ class Commands:
         self.app.msg("class:dim", f"output directory: {self.app.settings.out_dir}")
 
     def cmd_out(self, arg: str) -> None:
+        """`/out <dir>` sets the directory in one shot (resolve, auto-create,
+        set). `/out` with no arg opens the interactive picker: the prompt is
+        rooted at ~/ (uneditable), completes real folder names as you type, and
+        offers to create a missing folder. Esc cancels."""
         if arg:
             self._set_out_dir(arg)
             return
         self.app.msg("class:dim", f"output directory: {self.app.settings.out_dir}")
-        self.app.open_modal(
-            Modal(
-                prefix="out ❯ ",
-                placeholder="type anything to change directory — enter or esc to keep",
-                on_submit=self._set_out_dir,
-                initial="~/",
-            )
-        )
+        self.app.open_dir_picker()
 
     def cmd_quality(self, arg: str) -> None:
         if arg:

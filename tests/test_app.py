@@ -81,25 +81,73 @@ def test_hint_submission_dispatches_rehint(app):
     assert app.history[0].kind == "info" and app.sel is None
 
 
-def test_out_modal_prefills_home(app):
+def test_out_arg_sets_dir_in_one_shot(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    app.commands.cmd_out("Music")  # bare name is home-relative, auto-created
+    target = tmp_path / "Music"
+    assert target.is_dir()
+    assert app.settings.out_dir == target
+    assert app.dir_picker is None  # arg form never opens the picker
+
+
+def test_out_no_arg_opens_picker_with_locked_home_prefix(app):
     app.commands.cmd_out("")
-    assert app.modal is not None
-    assert app.input_buffer.text == "~/"
-    assert app.input_buffer.cursor_position == 2
+    assert app.dir_picker is not None and app.dir_picker.stage == "input"
+    assert app.input_buffer.text == ""  # "~/" is a prefix, not editable buffer text
+    assert app._input_prefix() == [("class:prompt", "❯ "), ("class:accent", "~/")]
+    assert app._input_hint() == [
+        ("class:input.hint", "  esc to cancel output directory change")
+    ]
 
 
-def test_out_modal_untouched_submit_keeps_dir(app):
+def test_out_picker_existing_path_sets_dir_and_closes(app):
+    app.commands.cmd_out("")
+    app.input_buffer.text = ""  # empty relative path → ~/ itself, which exists
+    app._accept(app.input_buffer)
+    assert app.dir_picker is None
+    assert app.settings.out_dir == Path.home()
+
+
+def test_out_picker_missing_path_prompts_to_create(app):
+    app.commands.cmd_out("")
+    app.input_buffer.text = "no-such-folder-xyz/deep"
+    app._accept(app.input_buffer)
+    picker = app.dir_picker
+    assert picker is not None and picker.stage == "confirm"
+    assert picker.typed == "no-such-folder-xyz/deep"
+    assert picker.pending == Path.home() / "no-such-folder-xyz/deep"
+    assert app.input_buffer.text == ""  # cleared while asking y/n
+    assert "(y/n)" in app._input_placeholder()
+
+
+def test_out_picker_decline_returns_to_path_input(app):
+    app.commands.cmd_out("")
+    app.input_buffer.text = "no-such-folder-xyz"
+    app._accept(app.input_buffer)
+    app._dir_decline_create()  # 'n'
+    assert app.dir_picker.stage == "input"
+    assert app.input_buffer.text == "no-such-folder-xyz"  # restored for editing
+    assert app.dir_picker.pending is None
+
+
+def test_out_picker_confirm_creates_folder_and_sets_dir(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    app.commands.cmd_out("")
+    app.input_buffer.text = "fresh/nested"
+    app._accept(app.input_buffer)
+    app._dir_confirm_create()  # 'y'
+    target = tmp_path / "fresh/nested"
+    assert target.is_dir()
+    assert app.settings.out_dir == target
+    assert app.dir_picker is None
+    assert any("created" in line for _, line in app.messages)
+
+
+def test_out_picker_escape_cancels_without_changing_dir(app):
     before = app.settings.out_dir
     app.commands.cmd_out("")
-    app._accept(app.input_buffer)  # still "~/"
-    assert app.modal is None and app.settings.out_dir == before
-
-
-def test_out_modal_escape_cancels(app):
-    before = app.settings.out_dir
-    app.commands.cmd_out("")
-    app.close_modal()
-    assert app.modal is None and app.input_buffer.text == ""
+    app.close_dir_picker()  # esc
+    assert app.dir_picker is None and app.input_buffer.text == ""
     assert app.settings.out_dir == before
 
 
@@ -120,7 +168,9 @@ def test_input_notice_overrides_help_hint(app):
 
 
 def test_modal_uses_contextual_input_hint(app):
-    app.commands.cmd_out("")
+    from transmute.widgets import Modal
+
+    app.open_modal(Modal(prefix="x ❯ ", placeholder="p", on_submit=lambda _t: None))
     assert "enter applies · esc cancels" in app._input_hint()[0][1]
 
 
