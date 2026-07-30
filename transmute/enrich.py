@@ -666,6 +666,24 @@ def _safe_filename(name: str) -> str:
     return re.sub(r'[/\\:*?"<>|\x00]', "_", name).strip()
 
 
+def _unique_path(target: Path) -> Path:
+    """Return `target`, or the first `name (n).ext` variant that does not exist.
+
+    The rename target may already hold an unrelated earlier download; never
+    overwrite it, but do not fall back to yt-dlp's raw `uploader - title` name
+    either, which carries the uploader alias alongside the real artist.
+    """
+    if not target.exists():
+        return target
+    stem, suffix = target.stem, target.suffix
+    counter = 1
+    while True:
+        candidate = target.with_name(f"{stem} ({counter}){suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 def apply_tags(path: Path, tags: TrackTags) -> Path:
     """Update owned ID3 fields and rename without replacing an existing file."""
     from mutagen.easyid3 import EasyID3
@@ -696,10 +714,11 @@ def apply_tags(path: Path, tags: TrackTags) -> Path:
     audio.save()
 
     if tags.artist and tags.title:
-        new_path = path.with_name(
+        target = path.with_name(
             _safe_filename(f"{tags.artist} - {tags.title}") + ".mp3"
         )
-        if new_path != path and not new_path.exists():
+        if target != path:
+            new_path = _unique_path(target)
             path.rename(new_path)
             return new_path
     return path

@@ -67,6 +67,44 @@ def test_selected_entry_highlighted_and_hint_splits_body(app):
     assert any("failed" in text for _, text in below)
 
 
+def test_done_entry_renders_indented_metadata_detail(app):
+    job = Job(url="u", path=Path("/x/2hollis - bride.mp3"))
+    tags = TrackTags(
+        artist="2hollis",
+        title="bride",
+        album="Boy",
+        year="2025",
+        genre="Hyperpop",
+    )
+    app._note_done(job, tags)
+
+    entry = app.history[-1]
+    assert entry.line == "✔ 2hollis - bride.mp3"
+    assert entry.detail == "2hollis • Boy • 2025 • Hyperpop"
+
+    above, _ = app._build()
+    assert any(entry.detail in text for _, text in above)
+
+
+def test_done_entry_detail_notes_derivative_and_omits_empty_fields(app):
+    job = Job(url="u", path=Path("/x/3enialis - flip.mp3"))
+    tags = TrackTags(
+        artist="3enialis",
+        title="flip",
+        genre="Hyperpop",
+        kind="derivative",
+        based_on="2hollis - bride",
+    )
+    app._note_done(job, tags)
+
+    assert app.history[-1].detail == "3enialis • Hyperpop • derivative of 2hollis - bride"
+
+
+def test_done_entry_without_tags_has_no_detail(app):
+    app._note_done(Job(url="u", path=Path("/x/raw.mp3")), None)
+    assert app.history[-1].detail is None
+
+
 def test_enter_retries_selected_failure(app):
     submitted = []
     app.submit_urls = lambda urls: submitted.append(urls)

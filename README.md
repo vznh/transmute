@@ -30,7 +30,8 @@ at 320kbps with embedded metadata and cover art, to `~/Downloads` by default.
 After each download, Transmute runs a provider-backed web search to find the track's
 canonical metadata — artist, title, album, release year, genre. Tags are written into
 the MP3 (cover art is preserved) and the file is renamed to
-`Artist - Title.mp3`.
+`Artist - Title.mp3`. If a file with that name already exists, Transmute keeps it
+and adds a numeric suffix (`Artist - Title (1).mp3`) rather than overwriting it.
 
 Auth (in order of preference):
 

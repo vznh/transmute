@@ -40,6 +40,7 @@ class Entry:
     line: str
     kind: EntryKind = "info"
     job: Job | None = None
+    detail: str | None = None  # indented metadata rendered under `line`
 
 
 @dataclass
@@ -156,6 +157,8 @@ class App:
             e = hist[i]
             style = f"{e.style} class:selected" if i == sel else e.style
             cur.append((style, f"    {e.line[:width]}\n"))
+            if e.detail:
+                cur.append(("class:dim", f"      {e.detail[:width]}\n"))
             if i == sel and e.kind == "hint":
                 cur = below  # inline hint input renders between above/below
 
@@ -452,11 +455,11 @@ class App:
             self.active[seq] = text
         self.refresh()
 
-    def _note_done(self, job: Job, desc: str | None) -> None:
-        line = f"✔ {self._display_name(job)}"
-        if desc:
-            line += f"   ♪ {desc}"
-        self.add_entry(Entry("class:ok", line, "ok", job))
+    def _note_done(self, job: Job, tags: TrackTags | None) -> None:
+        detail = self._detail_line(tags) if tags else None
+        self.add_entry(
+            Entry("class:ok", f"✔ {self._display_name(job)}", "ok", job, detail=detail)
+        )
 
     def _note_low_confidence(self, job: Job, again: bool = False) -> None:
         tail = (
@@ -523,13 +526,13 @@ class App:
                 self._note_failed(job)
                 return
 
-            desc = tags = None
+            tags = None
             if self.enricher.enabled:
                 self._set_active(seq, f"enriching  {(job.title or '')[:44]}")
-                desc, tags = self._enrich(job)
+                tags = self._enrich(job)
 
             self._record_completed(job)
-            self._note_done(job, desc)
+            self._note_done(job, tags)
             if tags is not None and tags.confidence == "low":
                 self._note_low_confidence(job)
         except Exception as error:  # noqa: BLE001
@@ -553,7 +556,7 @@ class App:
         hint: str | None = None,
         *,
         failure_label: str = "enrichment skipped",
-    ) -> tuple[str | None, TrackTags | None]:
+    ) -> TrackTags | None:
         try:
             tags = self.enricher.lookup(
                 title=job.title or "",
@@ -569,14 +572,14 @@ class App:
                 "class:warn",
                 f"⚠ {failure_label}: {self._error_line(error)}",
             )
-            return None, None
+            return None
         if not tags or not job.path:
             error = self.enricher.last_error
             if not job.path and not error:
                 error = "download output path unavailable"
             if error:
                 self.msg("class:warn", f"⚠ {failure_label}: {error}")
-            return None, None
+            return None
         try:
             job.path = apply_tags(job.path, tags)
         except Exception as error:  # noqa: BLE001
@@ -584,16 +587,16 @@ class App:
                 "class:warn",
                 f"⚠ tagging skipped: {self._error_line(error)}",
             )
-            return None, None
+            return None
         job.title = tags.title or job.title
-        return self._describe(tags), tags
+        return tags
 
     def _rehint(self, job: Job, hint: str, placeholder: Entry) -> None:
-        desc, tags = self._enrich(job, hint=hint, failure_label="retry failed")
+        tags = self._enrich(job, hint=hint, failure_label="retry failed")
         self._remove_entry(placeholder)
-        if desc:
-            self._note_done(job, desc)
-            if tags is not None and tags.confidence == "low":
+        if tags is not None:
+            self._note_done(job, tags)
+            if tags.confidence == "low":
                 self._note_low_confidence(job, again=True)
 
     def _retry_selected(self) -> None:
@@ -610,12 +613,16 @@ class App:
         self.submit_urls([entry.job.url])
 
     @staticmethod
-    def _describe(tags: TrackTags) -> str:
-        parts = [p for p in (tags.album, tags.year, tags.genre) if p]
+    def _detail_line(tags: TrackTags) -> str | None:
+        """The `•`-separated metadata rendered under a completed entry."""
+        parts = [tags.artist]
+        if tags.album_artist and tags.album_artist != tags.artist:
+            parts.append(tags.album_artist)
+        parts += [tags.album, tags.year, tags.genre]
         if tags.kind == "derivative" and tags.based_on:
             parts.append(f"derivative of {tags.based_on}")
-        detail = f"  ({' · '.join(parts)})" if parts else ""
-        return f"{tags.title}{detail}"
+        joined = " • ".join(p for p in parts if p)
+        return joined or None
 
     @staticmethod
     def _error_line(error: Exception) -> str:
