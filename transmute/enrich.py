@@ -78,10 +78,18 @@ nightcore/dariacore.
 STEP 2 — Attribute and find release info for THAT recording:
 - "original" or "reupload" → artist is the original artist (canonical spelling, never \
 the channel name); use the official release's album/year/genre.
-- "derivative" → artist is the uploader's artist identity (their catalogued alias); \
-keep the original artist out of the artist field (they may appear in the title if \
-catalogued that way, e.g. "Song (Artist flip)"); use the derivative's own release \
-info if it was released, else album may be null.
+- "derivative" → decide the artist by whether the derivative is its own released \
+work. Publishing or re-hosting a track is NOT authorship:
+  - A reproduction, edit, flip, bootleg, mashup, sped-up/slowed version, or fan-made \
+instrumental remake of an existing song → artist is the ORIGINAL recording artist of \
+the underlying song (canonical spelling). The uploader only remade or re-hosted it; \
+put their role in the title if catalogued that way (e.g. "Song (reprod. Uploader)") \
+and in "based_on", never in the artist field. Example: "2hollis - all of the lights \
+(reprod. by me)" uploaded by 3enialis → artist "2hollis", not "3enialis".
+  - A distinct work released under the uploader's OWN catalogued artist identity (an \
+official remix or a cover credited to them on a real release) → artist is that \
+uploader identity, with the source artist and song in "based_on".
+Use the derivative's own release info if it was released, else album may be null.
 If it's a single or unreleased track, album may be the single name or null.
 
 STEP 3 — If the artist is still unclear (unreleased tracks, leaks, snippets, and \
@@ -91,8 +99,9 @@ handles, emoji codes, era names). Fetch the source page itself if useful. Search
 communities — Reddit, Genius, leak/tracker databases and wikis — for the title or \
 distinctive phrases from the description; these uploads are usually well-documented by \
 fans even when unlabeled. Use the community-consensus attribution (e.g. leaked-song \
-databases' credited artist and era). Only if attribution is genuinely unknowable, \
-fall back to the uploader name.
+databases' credited artist and era). Being the uploader or host is not evidence of \
+authorship; only as a last resort, when attribution is genuinely unknowable, fall \
+back to the uploader name and mark confidence "low".
 
 Respond with ONLY a JSON object, no other text:
 {{"kind": "original"|"reupload"|"derivative", "based_on": str|null, "artist": str, \
@@ -666,6 +675,24 @@ def _safe_filename(name: str) -> str:
     return re.sub(r'[/\\:*?"<>|\x00]', "_", name).strip()
 
 
+def _unique_path(target: Path) -> Path:
+    """Return `target`, or the first `name (n).ext` variant that does not exist.
+
+    The rename target may already hold an unrelated earlier download; never
+    overwrite it, but do not fall back to yt-dlp's raw `uploader - title` name
+    either, which carries the uploader alias alongside the real artist.
+    """
+    if not target.exists():
+        return target
+    stem, suffix = target.stem, target.suffix
+    counter = 1
+    while True:
+        candidate = target.with_name(f"{stem} ({counter}){suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 def apply_tags(path: Path, tags: TrackTags) -> Path:
     """Update owned ID3 fields and rename without replacing an existing file."""
     from mutagen.easyid3 import EasyID3
@@ -696,10 +723,11 @@ def apply_tags(path: Path, tags: TrackTags) -> Path:
     audio.save()
 
     if tags.artist and tags.title:
-        new_path = path.with_name(
+        target = path.with_name(
             _safe_filename(f"{tags.artist} - {tags.title}") + ".mp3"
         )
-        if new_path != path and not new_path.exists():
+        if target != path:
+            new_path = _unique_path(target)
             path.rename(new_path)
             return new_path
     return path

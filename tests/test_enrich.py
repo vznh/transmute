@@ -28,7 +28,7 @@ def test_tracktags_defaults():
     assert t.album is None and t.confidence is None and t.kind is None
 
 
-def test_apply_tags_preserves_unowned_fields_and_avoids_collision(
+def test_apply_tags_preserves_unowned_fields_and_disambiguates_collision(
     monkeypatch, tmp_path
 ):
     source = tmp_path / "Source - Upload.mp3"
@@ -54,12 +54,40 @@ def test_apply_tags_preserves_unowned_fields_and_avoids_collision(
         ),
     )
 
-    assert result == source
-    assert source.exists() and target.exists()
+    # The clean target already exists, so we neither overwrite it nor keep the
+    # raw `uploader - title` upload name; we disambiguate with a numeric suffix.
+    assert result == tmp_path / "Artist - Song (1).mp3"
+    assert result.exists()
+    assert not source.exists()
+    assert target.exists()
     assert audio["composer"] == ["Existing Composer"]
     assert audio["artist"] == "Artist"
     assert audio["title"] == "Song"
     assert audio.saved is True
+
+
+def test_apply_tags_collision_drops_uploader_prefixed_name(monkeypatch, tmp_path):
+    # Regression: an upload of "2hollis - bride" by uploader "3enialis" lands on
+    # disk as "3enialis - 2hollis - bride.mp3" (yt-dlp's uploader - title). When
+    # the user already has the canonical "2hollis - bride.mp3", the file must not
+    # keep the misleading two-artist name.
+    source = tmp_path / "3enialis - 2hollis - bride.mp3"
+    canonical = tmp_path / "2hollis - bride.mp3"
+    source.touch()
+    canonical.touch()
+
+    class FakeAudio(dict):
+        def save(self):
+            pass
+
+    monkeypatch.setattr("mutagen.easyid3.EasyID3", lambda _path: FakeAudio())
+
+    result = apply_tags(source, TrackTags(artist="2hollis", title="bride"))
+
+    assert result == tmp_path / "2hollis - bride (1).mp3"
+    assert result.exists()
+    assert not source.exists()
+    assert canonical.exists()
 
 
 def test_apply_tags_renames_to_sanitized_metadata_name(monkeypatch, tmp_path):
