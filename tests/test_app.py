@@ -487,6 +487,16 @@ def test_out_picker_escape_cancels_without_changing_dir(app):
     assert app.settings.out_dir == before
 
 
+def test_status_line_shows_labeled_settings_after_hint(app, tmp_path):
+    app.set_out_dir(tmp_path / "Music")
+    app.set_quality("192")
+
+    assert app._status_line() == app._input_hint() + app._toolbar()
+    toolbar_text = "".join(chunk for _, chunk in app._toolbar())
+    assert f"out {tmp_path / 'Music'}" in toolbar_text
+    assert "q 192k" in toolbar_text
+
+
 def test_settings_persist_across_app_instances(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
