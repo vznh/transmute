@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from .config import Settings
 
@@ -82,6 +83,7 @@ class Job:
     error: str | None = None  # short human-readable summary
     error_detail: str | None = None  # full untruncated message from yt-dlp
     retryable: bool = True
+    history_id: str = field(default_factory=lambda: uuid4().hex, compare=False)
 
 
 class _SilentLogger:

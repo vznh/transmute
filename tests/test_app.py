@@ -5,6 +5,8 @@ never run) and stub out the thread pool so nothing touches the network.
 """
 
 import asyncio
+import os
+import stat
 from pathlib import Path
 from subprocess import TimeoutExpired
 from types import SimpleNamespace
@@ -18,6 +20,7 @@ from transmute.app import App, Entry
 from transmute.config import Settings
 from transmute.downloader import Job
 from transmute.enrich import TrackTags
+from transmute.history import ActivityStore, HistoryStoreError
 
 
 class RecordingPool:
@@ -27,12 +30,19 @@ class RecordingPool:
     def submit(self, fn, *args):
         self.calls.append((fn.__name__, args))
 
+    def shutdown(self, wait=True):
+        pass
+
 
 @pytest.fixture
 def app(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    return App(history_file=tmp_path / "history", pool=RecordingPool())
+    return App(
+        activity_store=ActivityStore(tmp_path / "activity.sqlite3"),
+        history_file=tmp_path / "input-history",
+        pool=RecordingPool(),
+    )
 
 
 def test_display_name_prefers_path(app):
@@ -40,6 +50,21 @@ def test_display_name_prefers_path(app):
     assert app._display_name(job) == "Artist - Song.mp3"
     assert app._display_name(Job(url="u", title="Song")) == "Song"
     assert app._display_name(Job(url="u")) == "u"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_existing_custom_prompt_history_parent_permissions_are_unchanged(
+    tmp_path,
+):
+    custom_parent = tmp_path / "shared"
+    custom_parent.mkdir(mode=0o755)
+    custom_parent.chmod(0o755)
+    history_file = custom_parent / "prompt-history"
+
+    App._prepare_input_history(history_file)
+
+    assert stat.S_IMODE(custom_parent.stat().st_mode) == 0o755
+    assert stat.S_IMODE(history_file.stat().st_mode) == 0o600
 
 
 def test_selection_walks_actionable_entries_only(app):
@@ -107,7 +132,7 @@ def test_done_entry_without_tags_has_no_detail(app):
 
 def test_enter_retries_selected_failure(app):
     submitted = []
-    app.submit_urls = lambda urls: submitted.append(urls)
+    app._submit_jobs = lambda jobs: submitted.append([job.url for job in jobs])
     app.add_entry(Entry("class:err", "failed", "err", Job(url="u2")))
     app.sel = 0
     app._retry_selected()
@@ -115,12 +140,270 @@ def test_enter_retries_selected_failure(app):
     assert app.history == [] and app.sel is None
 
 
+def test_activity_restores_as_actionable_jobs_across_app_instances(tmp_path):
+    db = tmp_path / "activity.sqlite3"
+    track_path = tmp_path / "Artist - Song.mp3"
+    track_path.touch()
+    store = ActivityStore(db)
+    session_id = store.start_session()
+
+    done = Job(
+        url="https://youtu.be/done",
+        status="done",
+        title="Song",
+        uploader="Artist",
+        duration=123,
+        description="release notes",
+        tags=["house"],
+        path=track_path,
+    )
+    store.queue_job(done, session_id)
+    done.status = "done"
+    store.save_success(done, "Artist — Song", True)
+
+    retryable = Job(
+        url="https://youtu.be/retry",
+        status="error",
+        error="network error",
+    )
+    store.queue_job(retryable, session_id)
+    retryable.status = "error"
+    store.save_failure(retryable)
+
+    permanent = Job(
+        url="https://youtu.be/gone",
+        status="error",
+        error="video unavailable",
+        retryable=False,
+    )
+    store.queue_job(permanent, session_id)
+    permanent.status = "error"
+    permanent.retryable = False
+    store.save_failure(permanent)
+    store.finish_session(session_id)
+
+    restored = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history",
+        pool=RecordingPool(),
+    )
+
+    assert [entry.kind for entry in restored.history] == [
+        "ok",
+        "hint",
+        "err",
+        "info",
+    ]
+    assert restored.history[0].job is restored.completed[0]
+    assert restored.history[1].job is restored.completed[0]
+    assert restored.history[2].job is restored.failed[0]
+    assert restored.history[0].line == "✔ Artist - Song.mp3"
+    assert restored.history[0].detail == "Artist — Song"
+    assert restored.completed[0].description == "release notes"
+    assert restored._actionable() == [1, 2]
+    assert restored.active == {} and restored.queued == 0 and restored.sel is None
+
+
+def test_clear_stays_cleared_but_keeps_in_flight_jobs(tmp_path):
+    db = tmp_path / "activity.sqlite3"
+    first = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history-1",
+        pool=RecordingPool(),
+    )
+
+    old = Job(url="https://youtu.be/old", status="done", title="Old")
+    first.activity_store.queue_job(old, first.session_id)
+    old.status = "done"
+    first.activity_store.save_success(old, None, False)
+    first.completed.append(old)
+    first.history.append(first._done_entry(old, None))
+
+    in_flight = Job(url="https://youtu.be/new")
+    first.activity_store.queue_job(in_flight, first.session_id)
+    first.commands.cmd_clear("")
+    assert first.history == [] and first.completed == [] and first.failed == []
+
+    in_flight.status = "done"
+    in_flight.title = "New"
+    first.activity_store.save_success(in_flight, None, False)
+
+    reopened = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history-2",
+        pool=RecordingPool(),
+    )
+    assert [job.title for job in reopened.completed] == ["New"]
+    assert all("Old" not in entry.line for entry in reopened.history)
+
+
+def test_clear_keeps_persistence_failure_visible(app, monkeypatch):
+    app.msg("class:dim", "old message")
+    monkeypatch.setattr(
+        app.activity_store,
+        "clear",
+        Mock(side_effect=HistoryStoreError("database is locked")),
+    )
+
+    app.commands.cmd_clear("")
+
+    assert all("old message" not in line for _, line in app.messages)
+    assert any("history unavailable" in line for _, line in app.messages)
+
+
+def test_missing_file_does_not_restore_actionable_hint(tmp_path):
+    db = tmp_path / "activity.sqlite3"
+    store = ActivityStore(db)
+    session_id = store.start_session()
+    job = Job(
+        url="https://youtu.be/missing",
+        status="done",
+        title="Missing",
+        path=tmp_path / "missing.mp3",
+    )
+    store.queue_job(job, session_id)
+    job.status = "done"
+    store.save_success(job, None, True)
+    store.finish_session(session_id)
+
+    restored = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history",
+        pool=RecordingPool(),
+    )
+
+    assert [entry.kind for entry in restored.history] == ["ok"]
+    assert restored._actionable() == []
+
+
+def test_hint_claimed_by_another_session_is_not_restored_as_actionable(tmp_path):
+    db = tmp_path / "activity.sqlite3"
+    track_path = tmp_path / "track.mp3"
+    track_path.touch()
+    seed = ActivityStore(db)
+    seed_session = seed.start_session()
+    job = Job(
+        url="https://youtu.be/claimed-hint",
+        title="Track",
+        path=track_path,
+    )
+    seed.queue_job(job, seed_session)
+    seed.save_success(job, "Artist", needs_hint=True)
+    seed.finish_session(seed_session)
+
+    owner = ActivityStore(db)
+    owner_session = owner.start_session()
+    restored_job = owner.load_jobs()[0].job
+    assert isinstance(owner.claim_hint(restored_job, owner_session), str)
+
+    observer = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history",
+        pool=RecordingPool(),
+    )
+
+    assert [entry.kind for entry in observer.history] == ["ok"]
+    assert observer._actionable() == []
+    owner.finish_session(owner_session)
+
+
+def test_restored_activity_does_not_affect_current_run_summary(
+    tmp_path, monkeypatch, capsys
+):
+    db = tmp_path / "activity.sqlite3"
+    store = ActivityStore(db)
+    session_id = store.start_session()
+    job = Job(url="https://youtu.be/old", status="error", error="network error")
+    store.queue_job(job, session_id)
+    job.status = "error"
+    store.save_failure(job)
+    store.finish_session(session_id)
+
+    restored = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history",
+        pool=RecordingPool(),
+    )
+    monkeypatch.setattr(restored.app, "run", Mock())
+    restored.run()
+
+    assert "0 converted · 0 failed" in capsys.readouterr().out
+
+
+def test_interrupted_executor_drain_keeps_session_claims_live(app, monkeypatch):
+    finish_session = Mock(wraps=app.activity_store.finish_session)
+    monkeypatch.setattr(app.activity_store, "finish_session", finish_session)
+    monkeypatch.setattr(app.app, "run", Mock())
+    app.pool.shutdown = Mock(side_effect=KeyboardInterrupt)
+
+    app.run()
+
+    finish_session.assert_not_called()
+
+
+def test_retry_all_skips_nonretryable_failures(app):
+    retryable = Job(url="https://youtu.be/retry", status="error")
+    permanent = Job(
+        url="https://youtu.be/gone",
+        status="error",
+        retryable=False,
+    )
+    app.failed = [retryable, permanent]
+    app.history = [
+        app._failure_entry(retryable),
+        app._failure_entry(permanent),
+    ]
+    submitted = []
+    app._submit_jobs = lambda jobs: submitted.extend(jobs)
+
+    app.commands.cmd_retry("")
+
+    assert submitted == [retryable]
+    assert app.failed == [permanent]
+    assert [entry.job for entry in app.history] == [permanent]
+
+
+def test_two_apps_cannot_both_retry_the_same_failure(tmp_path):
+    db = tmp_path / "activity.sqlite3"
+    seed = ActivityStore(db)
+    session_id = seed.start_session()
+    job = Job(url="https://youtu.be/retry", status="error", error="network error")
+    seed.queue_job(job, session_id)
+    seed.save_failure(job)
+    seed.finish_session(session_id)
+
+    first = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history-1",
+        pool=RecordingPool(),
+    )
+    second = App(
+        activity_store=ActivityStore(db),
+        history_file=tmp_path / "prompt-history-2",
+        pool=RecordingPool(),
+    )
+    first.sel = first._actionable()[0]
+    second.sel = second._actionable()[0]
+
+    first._retry_selected()
+    second._retry_selected()
+
+    assert len(first.pool.calls) == 1
+    assert second.pool.calls == []
+    assert second.queued == 0
+    assert any("already active" in line for _, line in second.messages)
+
+
 def test_hint_submission_dispatches_rehint(app):
-    app.add_entry(Entry("class:warn", "hint me", "hint", Job(url="u", title="t")))
+    job = Job(url="u", title="t")
+    app.activity_store.queue_job(job, app.session_id)
+    app.activity_store.save_success(job, None, needs_hint=True)
+    app.add_entry(Entry("class:warn", "hint me", "hint", job))
     app.sel = 0
     app.hint_buffer.text = "actually by X"
     app._accept_hint(app.hint_buffer)
     assert app.pool.calls[-1][0] == "_rehint"
+    assert isinstance(app.pool.calls[-1][1][3], str)
     assert app.history[0].kind == "info" and app.sel is None
 
 
@@ -384,7 +667,9 @@ def test_submit_uses_immutable_settings_snapshot(app):
 
     name, args = app.pool.calls[-1]
     assert name == "_process"
-    assert args == ("https://example.com/song", original)
+    assert isinstance(args[0], Job)
+    assert args[0].url == "https://example.com/song"
+    assert args[1] == original
     assert args[1].quality == "320"
     assert app.settings_snapshot().quality == "128"
 
@@ -394,9 +679,11 @@ def test_unexpected_download_error_becomes_failed_job(app, monkeypatch):
         raise OSError("disk unavailable\nextra details")
 
     monkeypatch.setattr("transmute.app.download_job", fail_download)
+    job = Job(url="https://example.com/song")
+    app.activity_store.queue_job(job, app.session_id)
     app.queued = 1
 
-    app._process("https://example.com/song", Settings())
+    app._process(job, Settings())
 
     assert app.queued == 0
     assert app.active == {}
@@ -433,9 +720,11 @@ def test_tagging_error_keeps_successful_download(app, monkeypatch, tmp_path):
         ),
     )
     app.enricher.enabled = True
+    job = Job(url="https://example.com/song")
+    app.activity_store.queue_job(job, app.session_id)
     app.queued = 1
 
-    app._process("https://example.com/song", Settings(out_dir=tmp_path))
+    app._process(job, Settings(out_dir=tmp_path))
 
     assert app.active == {}
     assert app.failed == []
