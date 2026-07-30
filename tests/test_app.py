@@ -315,7 +315,7 @@ def test_ctrl_c_warns_then_exits(app):
     binding = app.app.key_bindings.get_bindings_for_keys((Keys.ControlC,))[-1]
 
     binding.handler(event)
-    assert "press Ctrl+C to exit" in app._input_hint()[0][1]
+    assert "press CTRL+C again to exit" in app._input_hint()[0][1]
     event.app.exit.assert_not_called()
 
     binding.handler(event)
