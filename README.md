@@ -12,7 +12,7 @@ You can do any of the two options:
   
 We support only https://[youtube.com, soundcloud.com] links.  
 
-3. Ensure you output to the right directory
+3. Ensure you output to the right directory using `/out`
 
    
 4. We use Claude / Codex to utilize Web Search to ensure proper metadata is fulfilled
