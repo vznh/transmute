@@ -90,6 +90,37 @@ def test_explicit_source_is_used_verbatim(generator, closure):
     assert f'sha256 "{"a" * 64}"' in formula
 
 
+def test_formula_license_matches_the_project_metadata(generator, closure):
+    # Two files assert the licence; brew audit fails when they disagree.
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = pyproject["project"]["license"]
+
+    formula = generator.render_formula(
+        "0.2a", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
+    )
+
+    assert generator.LICENSE_EXPRESSION == declared
+    assert f'license "{declared}"' in formula
+
+
+def test_project_licence_stays_gpl_compatible(generator):
+    # mutagen is GPL-2.0-or-later and is imported for ID3 writes, so the
+    # distributed combination cannot carry permissive terms.
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["license"].startswith("GPL-")
+    assert (REPO_ROOT / "LICENSE").exists()
+
+
 def test_rendered_formula_declares_ffmpeg_and_every_resource(generator, closure):
     formula = generator.render_formula("9.9.9", "https://example.invalid/x.tar.gz", "0" * 64, list(closure.values()))
 
