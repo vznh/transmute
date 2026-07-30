@@ -10,7 +10,7 @@ QUALITIES = ("128", "192", "256", "320")
 MAX_WORKERS = 4
 
 
-@dataclass
+@dataclass(frozen=True)
 class Settings:
     out_dir: Path = field(default_factory=lambda: Path.home() / "Downloads")
     quality: str = "320"

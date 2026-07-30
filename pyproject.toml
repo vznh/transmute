@@ -26,3 +26,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["transmute"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "BLE", "I", "RUF005", "RUF100"]

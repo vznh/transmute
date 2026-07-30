@@ -6,6 +6,7 @@ never run) and stub out the thread pool so nothing touches the network.
 
 import asyncio
 from pathlib import Path
+from subprocess import TimeoutExpired
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -14,7 +15,9 @@ from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.keys import Keys
 
 from transmute.app import App, Entry
+from transmute.config import Settings
 from transmute.downloader import Job
+from transmute.enrich import TrackTags
 
 
 class RecordingPool:
@@ -26,12 +29,10 @@ class RecordingPool:
 
 
 @pytest.fixture
-def app(monkeypatch):
+def app(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    a = App()
-    a.pool = RecordingPool()
-    return a
+    return App(history_file=tmp_path / "history", pool=RecordingPool())
 
 
 def test_display_name_prefers_path(app):
@@ -264,10 +265,31 @@ def test_login_defaults_to_claude_without_replacing_api_key(app, monkeypatch):
 
     login.assert_called_once_with(
         ["claude", "auth", "login", "--claudeai"],
+        timeout=300,
         check=False,
     )
     assert app.enricher.backend == "openai_api"
     assert "remains prioritized" in app.messages[-1][1]
+
+
+def test_login_timeout_is_actionable(app, monkeypatch):
+    async def run_now(blocking):
+        return blocking()
+
+    monkeypatch.setattr("prompt_toolkit.application.run_in_terminal", run_now)
+    monkeypatch.setattr(
+        "transmute.commands.subprocess.run",
+        Mock(side_effect=TimeoutExpired(cmd=["claude"], timeout=300)),
+    )
+    monkeypatch.setattr(
+        app.app,
+        "create_background_task",
+        lambda coroutine: asyncio.run(coroutine),
+    )
+
+    app.commands.cmd_login("claude")
+
+    assert app.messages[-1] == ("class:err", "claude login timed out")
 
 
 def test_default_input_hint_is_below_prompt_help(app):
@@ -314,3 +336,72 @@ def test_unsupported_url_denied(app):
     app.input_buffer.text = "https://vimeo.com/123"
     app._accept(app.input_buffer)
     assert submitted == []
+
+
+def test_submit_uses_immutable_settings_snapshot(app):
+    original = app.settings_snapshot()
+
+    app.submit_urls(["https://example.com/song"])
+    app.set_quality("128")
+
+    name, args = app.pool.calls[-1]
+    assert name == "_process"
+    assert args == ("https://example.com/song", original)
+    assert args[1].quality == "320"
+    assert app.settings_snapshot().quality == "128"
+
+
+def test_unexpected_download_error_becomes_failed_job(app, monkeypatch):
+    def fail_download(_job, _settings, _on_progress):
+        raise OSError("disk unavailable\nextra details")
+
+    monkeypatch.setattr("transmute.app.download_job", fail_download)
+    app.queued = 1
+
+    app._process("https://example.com/song", Settings())
+
+    assert app.queued == 0
+    assert app.active == {}
+    assert app.completed == []
+    assert len(app.failed) == 1
+    assert app.failed[0].status == "error"
+    assert app.failed[0].error == "disk unavailable"
+    assert app.history[-1].kind == "err"
+
+
+def test_tagging_error_keeps_successful_download(app, monkeypatch, tmp_path):
+    output = tmp_path / "Source - Song.mp3"
+    output.touch()
+
+    def complete_download(job, _settings, _on_progress):
+        job.status = "done"
+        job.title = "Song"
+        job.path = output
+        return job
+
+    def fail_tagging(_path, _tags):
+        raise OSError("cannot write tags")
+
+    monkeypatch.setattr("transmute.app.download_job", complete_download)
+    monkeypatch.setattr("transmute.app.apply_tags", fail_tagging)
+    monkeypatch.setattr(
+        app.enricher,
+        "lookup",
+        lambda **_kwargs: TrackTags(
+            artist="Artist",
+            title="Song",
+            kind="original",
+            confidence="high",
+        ),
+    )
+    app.enricher.enabled = True
+    app.queued = 1
+
+    app._process("https://example.com/song", Settings(out_dir=tmp_path))
+
+    assert app.active == {}
+    assert app.failed == []
+    assert len(app.completed) == 1
+    assert app.completed[0].path == output
+    assert app.history[-1].kind == "ok"
+    assert any("tagging skipped" in line for _, line in app.messages)
