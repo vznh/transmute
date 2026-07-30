@@ -23,14 +23,28 @@ rather than failing later mid-download.
 - The image is not altered. From the link you provide, we attach that image to it. 
   
 
-## Requirements
+## Install
 
-- [uv](https://docs.astral.sh/uv/) (manages Python + deps)
-- ffmpeg (`brew install ffmpeg`)
-- Claude Code signed in with Claude, or Codex CLI signed in with ChatGPT, for
-  subscription-backed metadata enrichment
+> The Homebrew tap and the PyPI release land with the first tagged version. Until
+> then, use the [from a checkout](#from-a-checkout) instructions below.
 
-## Run
+Homebrew pulls in ffmpeg for you:
+
+```sh
+brew install vznh/transmute/transmute
+```
+
+With Python tooling instead — ffmpeg is not included, so install it separately:
+
+```sh
+uv tool install transmute-cli   # or: pipx install transmute-cli
+brew install ffmpeg
+```
+
+Either way, start it by running `transmute`. Check what you have with
+`transmute --version`.
+
+### From a checkout
 
 ```sh
 uv sync
@@ -39,6 +53,15 @@ uv run transmute
 
 Run both commands from the repository root. After the first `uv sync`, starting
 Transmute only requires `uv run transmute`.
+
+## Requirements
+
+- ffmpeg — installed for you by Homebrew, otherwise `brew install ffmpeg`
+- Claude Code signed in with Claude, or Codex CLI signed in with ChatGPT, for
+  subscription-backed metadata enrichment
+- [uv](https://docs.astral.sh/uv/) — only to run from a checkout or to develop
+
+## Use
 
 Paste one or more links (even concatenated back-to-back) and hit Enter. Links are
 queued and processed in the background (up to 4 at a time) — the input line stays
@@ -132,6 +155,10 @@ uv run ruff check .
 
 If [`just`](https://just.systems/) is installed, the same workflows are available
 as `just run`, `just test`, `just lint`, and `just check`.
+
+Releasing to PyPI and the Homebrew tap is described in
+[`packaging/README.md`](packaging/README.md). After a dependency or version
+change, regenerate the formula with `just formula`.
 
 ## Project map
 
