@@ -31,12 +31,14 @@ rather than failing later mid-download.
 Homebrew pulls in ffmpeg for you:
 
 ```sh
-brew tap vznh/tap
+brew tap vznh/transmute https://github.com/vznh/transmute
 brew install transmute
 ```
 
-Homebrew asks you to trust a third-party tap before it will load a formula
-from one; run `brew trust vznh/tap` if it prompts.
+This repository is its own Homebrew tap, which is why the first command names
+the URL: without it, Homebrew would look for a separate `homebrew-`-prefixed
+repository. You only tap once. If Homebrew reports the tap as untrusted, run
+`brew trust vznh/transmute`.
 
 With Python tooling instead — ffmpeg is not included, so install it separately:
 

@@ -25,12 +25,22 @@ These steps need account access and cannot be done from this repository.
    Environments → New environment → `pypi`. Restrict it to tag pushes if you
    want a manual approval gate before publishing.
 
-3. **Create the tap repository.** Homebrew resolves `brew tap vznh/tap` to the
-   public GitHub repository `vznh/homebrew-tap`, with the formula at
-   `Formula/transmute.rb`. The tap is named `tap` rather than `transmute` so the
-   formula can be installed by its bare name, `brew install transmute`, instead
-   of the stuttering `vznh/transmute/transmute`. No formula named `transmute`
-   exists in homebrew-core, so the bare name is unambiguous once tapped.
+3. **Nothing to create — this repository is the tap.** `Formula/transmute.rb`
+   is generated here and served from here, so there is no separate
+   `homebrew-`-prefixed repository to maintain.
+
+   Homebrew normally derives a tap's URL from its name, mapping `vznh/transmute`
+   to `github.com/vznh/homebrew-transmute`. Passing the URL explicitly overrides
+   that, which is the whole reason a second repository is unnecessary:
+
+   ```sh
+   brew tap vznh/transmute https://github.com/vznh/transmute
+   ```
+
+   Homebrew discovers formulae only in a tap's root, `Formula/`, or
+   `HomebrewFormula/`, which is why the generated file lives in `Formula/` and
+   not beside its generator. No formula named `transmute` exists in
+   homebrew-core, so `brew install transmute` is unambiguous once tapped.
 
 ## Per release
 
@@ -74,14 +84,15 @@ These steps need account access and cannot be done from this repository.
    Both sources build the same package; PyPI is preferred once the project
    exists because its sdist is the artifact the release workflow verified.
 
-4. Copy `packaging/homebrew/transmute.rb` to `Formula/transmute.rb` in the tap
-   repository and push.
+4. Commit the regenerated `Formula/transmute.rb` and push it to `main`.
+   Homebrew serves a tap from its default branch, so the release is not
+   installable until the formula is on `main`.
 
 5. Verify against the real tap:
 
    ```sh
-   brew tap vznh/tap
-   brew trust vznh/tap    # Homebrew will not load a formula from an untrusted tap
+   brew tap vznh/transmute https://github.com/vznh/transmute
+   brew trust vznh/transmute   # Homebrew will not load a formula from an untrusted tap
    brew install transmute
    brew test transmute
    ```
