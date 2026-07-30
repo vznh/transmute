@@ -52,6 +52,9 @@ Run every command from the repository root.
   target so failures remain attributable.
 - **D10 — Finish broadly.** Run the complete local gate before handoff unless an
   external dependency makes it impossible; disclose any skipped check.
+- **D11 — Regenerate the Homebrew formula:** `just formula`. Required whenever a
+  runtime dependency, `uv.lock`, or `__version__` changes; the formula is
+  derived from the lockfile and must not be hand-edited.
 
 ## 3. Product invariants
 
@@ -552,6 +555,16 @@ main
   bitrate resolve as runtime command → `~/.transmute/settings.json` → built-in
   defaults. An unreadable or schema-incompatible settings file falls back to
   defaults with a bounded warning and is never overwritten implicitly.
+- **DEP14 — Keep the version single-sourced.** `transmute/__init__.py` owns
+  `__version__`; `pyproject.toml` and the Homebrew formula are derived from it.
+  Do not reintroduce a second version literal.
+- **DEP15 — Keep the release tag and the version in step.** Tags are bare
+  versions such as `0.2a`. `release.yml` compares the tag to the built artifact
+  as PEP 440 versions and fails the publish when they disagree, so a `0.2a` tag
+  matches the normalised `0.2a0` filename but a `0.3a` tag does not.
+- **DEP16 — Treat prerelease versions as user-visible.** An alpha version is
+  normalised by PyPI (`0.2a` becomes `0.2a0`) and is skipped by default
+  resolvers, so install documentation must pin it explicitly.
 
 ## 15. Change and review discipline
 

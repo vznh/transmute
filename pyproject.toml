@@ -1,8 +1,21 @@
 [project]
 name = "transmute-cli"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Convert YouTube or SoundCloud links into rich MP3s."
+readme = "README.md"
 requires-python = ">=3.10"
+keywords = ["youtube", "soundcloud", "mp3", "id3", "yt-dlp", "tui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Conversion",
+]
 dependencies = [
     "yt-dlp>=2024.12.6",
     "prompt_toolkit>=3.0.43",
@@ -11,6 +24,11 @@ dependencies = [
     "mutagen>=1.47",
 ]
 
+[project.urls]
+Homepage = "https://github.com/vznh/transmute"
+Repository = "https://github.com/vznh/transmute"
+Issues = "https://github.com/vznh/transmute/issues"
+
 [project.scripts]
 transmute = "transmute.main:main"
 
@@ -18,14 +36,26 @@ transmute = "transmute.main:main"
 dev = [
     "pytest>=8",
     "ruff>=0.8",
+    # Marker evaluation in packaging/homebrew/generate_formula.py.
+    "packaging>=24",
+    # tomllib backport; the formula generator reads uv.lock on Python 3.10.
+    "tomli>=2; python_version < '3.11'",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "transmute/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["transmute"]
+
+# The sdist is what the Homebrew formula downloads and hashes, so it must carry
+# the tests and packaging inputs a formula audit expects to find.
+[tool.hatch.build.targets.sdist]
+include = ["transmute", "tests", "packaging", "README.md", "AGENTS.md"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "B", "BLE", "I", "RUF005", "RUF100"]

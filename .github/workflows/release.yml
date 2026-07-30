@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    tags:
+      # This repository tags bare versions ("0.2a"); the v-prefixed form is
+      # accepted too because PEP 440 treats it as the same version.
+      - "[0-9]*"
+      - "v[0-9]*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Every version the package claims to support in requires-python.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --python ${{ matrix.python-version }}
+      - run: uv run pytest
+      - run: uv run ruff check .
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # OIDC token for PyPI Trusted Publishing; no API token is stored anywhere.
+      id-token: write
+      # Creating the GitHub release that the Homebrew formula can point at.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - run: uv build
+
+      - name: Verify the tag matches the built version
+        id: version
+        run: |
+          # Compared as PEP 440 versions, not strings: a "0.2a" tag builds an
+          # artifact named "0.2a0", and both forms mean the same release.
+          uv run --with packaging --no-project python - "$GITHUB_REF_NAME" <<'PY'
+          import os, pathlib, re, sys
+          from packaging.version import InvalidVersion, Version
+
+          tag = sys.argv[1]
+          sdists = list(pathlib.Path("dist").glob("transmute_cli-*.tar.gz"))
+          if len(sdists) != 1:
+              sys.exit(f"expected exactly one sdist, found {[p.name for p in sdists]}")
+          built = re.fullmatch(r"transmute_cli-(.+)\.tar\.gz", sdists[0].name).group(1)
+          try:
+              parsed = Version(tag)
+          except InvalidVersion as error:
+              sys.exit(f"tag {tag} is not a PEP 440 version: {error}")
+          if parsed != Version(built):
+              sys.exit(f"tag {tag} does not match transmute/__init__.py (built {built})")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"prerelease={str(parsed.is_prerelease).lower()}\n")
+          print(f"tag {tag} matches built version {built}")
+          PY
+
+      - run: uv publish --trusted-publishing always
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Globbed rather than reconstructed, because the artifact carries the
+          # normalised version while the tag may not.
+          gh release create "$GITHUB_REF_NAME" \
+            dist/transmute_cli-*.tar.gz \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --prerelease="${{ steps.version.outputs.prerelease }}"

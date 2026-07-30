@@ -23,14 +23,31 @@ rather than failing later mid-download.
 - The image is not altered. From the link you provide, we attach that image to it. 
   
 
-## Requirements
+## Install
 
-- [uv](https://docs.astral.sh/uv/) (manages Python + deps)
-- ffmpeg (`brew install ffmpeg`)
-- Claude Code signed in with Claude, or Codex CLI signed in with ChatGPT, for
-  subscription-backed metadata enrichment
+> The Homebrew tap and the PyPI release land with the first tagged version. Until
+> then, use the [from a checkout](#from-a-checkout) instructions below.
 
-## Run
+Homebrew pulls in ffmpeg for you:
+
+```sh
+brew install vznh/transmute/transmute
+```
+
+With Python tooling instead — ffmpeg is not included, so install it separately:
+
+```sh
+uv tool install "transmute-cli==0.2a0"   # or: pipx install "transmute-cli==0.2a0"
+brew install ffmpeg
+```
+
+The version is pinned because Transmute is still an alpha, and `uv` and `pip`
+skip prereleases unless you ask for one by name.
+
+Either way, start it by running `transmute`. Check what you have with
+`transmute --version`.
+
+### From a checkout
 
 ```sh
 uv sync
@@ -39,6 +56,15 @@ uv run transmute
 
 Run both commands from the repository root. After the first `uv sync`, starting
 Transmute only requires `uv run transmute`.
+
+## Requirements
+
+- ffmpeg — installed for you by Homebrew, otherwise `brew install ffmpeg`
+- Claude Code signed in with Claude, or Codex CLI signed in with ChatGPT, for
+  subscription-backed metadata enrichment
+- [uv](https://docs.astral.sh/uv/) — only to run from a checkout or to develop
+
+## Use
 
 Paste one or more links (even concatenated back-to-back) and hit Enter. Links are
 queued and processed in the background (up to 4 at a time) — the input line stays
@@ -133,6 +159,10 @@ uv run ruff check .
 If [`just`](https://just.systems/) is installed, the same workflows are available
 as `just run`, `just test`, `just lint`, and `just check`.
 
+Releasing to PyPI and the Homebrew tap is described in
+[`packaging/README.md`](packaging/README.md). After a dependency or version
+change, regenerate the formula with `just formula`.
+
 ## Project map
 
 `App` owns session state and orchestration. The interface modules read that
@@ -150,7 +180,7 @@ main
 
 Entry point
 
-- `transmute/main.py` — process startup and wiring
+- `transmute/main.py` — process startup, `--version`/`--help`, and wiring
 - `transmute/__main__.py` — supports `python -m transmute`
 
 Core
@@ -175,8 +205,10 @@ Services
 
 Tests
 
+- `tests/test_main.py` — entry-point argument handling
 - `tests/test_app.py` — selection, retry, modal, queue, and notice state
 - `tests/test_downloader.py` — URL parsing, yt-dlp options, and error classification
 - `tests/test_enrich.py` — credentials, provider calls, tagging, and renaming
 - `tests/test_settings.py` — settings round-trip, rejection, and fallback
 - `tests/test_history.py` — activity storage, retry/hint claiming, session recovery
+- `tests/test_packaging.py` — Homebrew resource closure derived from `uv.lock`
