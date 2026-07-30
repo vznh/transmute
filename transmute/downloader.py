@@ -1,11 +1,12 @@
 """Local yt-dlp download pipeline."""
+
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-MAX_WORKERS = 4
+from .config import Settings
 
 URL_RE = re.compile(r"https?://(?:(?!https?://)\S)+")
 
@@ -21,12 +22,6 @@ class Job:
     tags: list[str] | None = None
     path: Path | None = None
     error: str | None = None
-
-
-@dataclass
-class Settings:
-    out_dir: Path = field(default_factory=lambda: Path.home() / "Downloads")
-    quality: str = "320"
 
 
 def extract_urls(text: str) -> list[str]:
@@ -86,7 +81,7 @@ def download_job(job: Job, settings: Settings, on_progress=None) -> Job:
         if downloads and downloads[0].get("filepath"):
             job.path = Path(downloads[0]["filepath"])
         job.status = "done"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         job.status = "error"
         job.error = str(e).split("\n")[0][:200]
 

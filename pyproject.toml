@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-transmute = "transmute.app:main"
+transmute = "transmute.main:main"
 
 [build-system]
 requires = ["hatchling"]
