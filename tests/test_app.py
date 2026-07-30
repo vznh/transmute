@@ -4,11 +4,13 @@ These construct the real App (headless is fine — the Application is built but
 never run) and stub out the thread pool so nothing touches the network.
 """
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.keys import Keys
 
 from transmute.app import App, Entry
@@ -24,7 +26,9 @@ class RecordingPool:
 
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     a = App()
     a.pool = RecordingPool()
     return a
@@ -156,6 +160,87 @@ def test_unknown_command_reports_error(app):
     assert any("unknown command" in line for _, line in app.messages)
 
 
+def test_enrich_selects_provider_and_toggles(app):
+    app.commands.cmd_enrich("codex")
+    assert app.enricher.backend == "codex"
+    assert app.enricher.enabled
+    assert "Codex (ChatGPT subscription)" in app.messages[-1][1]
+
+    app.commands.cmd_enrich("off")
+    assert not app.enricher.enabled
+    app.commands.cmd_enrich("on")
+    assert app.enricher.enabled
+
+
+def test_enrich_rejects_unknown_provider(app):
+    before = (app.enricher.backend, app.enricher.enabled)
+    app.commands.cmd_enrich("other")
+    assert (app.enricher.backend, app.enricher.enabled) == before
+    assert "must be codex, claude, api, on, or off" in app.messages[-1][1]
+
+
+def test_key_auto_detects_provider_and_never_echoes_secret(app):
+    anthropic_key = "sk-ant-api03-secret"
+    openai_key = "sk-proj-secret"
+
+    app.commands._apply_key(anthropic_key)
+    assert app.enricher.backend == "anthropic_api"
+    app.commands._apply_key(openai_key)
+    assert app.enricher.backend == "openai_api"
+    assert app.enricher.api_key_source == "entered"
+    assert all(
+        anthropic_key not in line and openai_key not in line
+        for _, line in app.messages
+    )
+
+
+def test_key_argument_is_rejected_to_keep_secret_out_of_command_history(app):
+    history = InMemoryHistory()
+    app.input_buffer.history = history
+    app.input_buffer.text = "/key sk-proj-should-not-be-used"
+    app.input_buffer.validate_and_handle()
+
+    assert not app.enricher.has_api_key
+    assert "use the masked prompt" in app.messages[-1][1]
+    assert "sk-proj-should-not-be-used" not in app.messages[-1][1]
+    assert history.get_strings() == ["/key"]
+
+
+def test_enrich_api_requires_then_uses_active_key(app):
+    app.enricher.clear_api_key()
+    app.commands.cmd_enrich("api")
+    assert "no API key configured" in app.messages[-1][1]
+
+    app.commands._apply_key("sk-proj-test")
+    app.commands.cmd_enrich("codex")
+    app.commands.cmd_enrich("api")
+    assert app.enricher.backend == "openai_api"
+
+
+def test_login_defaults_to_claude_without_replacing_api_key(app, monkeypatch):
+    async def run_now(blocking):
+        return blocking()
+
+    login = Mock(return_value=SimpleNamespace(returncode=0))
+    monkeypatch.setattr("prompt_toolkit.application.run_in_terminal", run_now)
+    monkeypatch.setattr("transmute.commands.subprocess.run", login)
+    monkeypatch.setattr(
+        app.app,
+        "create_background_task",
+        lambda coroutine: asyncio.run(coroutine),
+    )
+    app.enricher.set_api_key("sk-proj-test")
+
+    app.commands.cmd_login("")
+
+    login.assert_called_once_with(
+        ["claude", "auth", "login", "--claudeai"],
+        check=False,
+    )
+    assert app.enricher.backend == "openai_api"
+    assert "remains prioritized" in app.messages[-1][1]
+
+
 def test_default_input_hint_is_below_prompt_help(app):
     assert app._input_hint() == [("class:input.hint", "  /help for more commands")]
 
@@ -174,12 +259,17 @@ def test_modal_uses_contextual_input_hint(app):
     assert "enter applies · esc cancels" in app._input_hint()[0][1]
 
 
-def test_ctrl_c_warns_below_input_then_exits(app):
+@pytest.mark.parametrize(
+    ("platform", "shortcut"),
+    [("darwin", "CMD + C"), ("linux", "CTRL + C")],
+)
+def test_ctrl_c_warns_with_platform_shortcut_then_exits(app, monkeypatch, platform, shortcut):
+    monkeypatch.setattr("transmute.keys.sys.platform", platform)
     event = SimpleNamespace(app=SimpleNamespace(exit=Mock()))
     binding = app.app.key_bindings.get_bindings_for_keys((Keys.ControlC,))[-1]
 
     binding.handler(event)
-    assert "press ctrl-c again to exit" in app._input_hint()[0][1]
+    assert f"press {shortcut} to exit" in app._input_hint()[0][1]
     event.app.exit.assert_not_called()
 
     binding.handler(event)
@@ -189,6 +279,14 @@ def test_ctrl_c_warns_below_input_then_exits(app):
 def test_url_paste_submits(app):
     submitted = []
     app.submit_urls = lambda urls: submitted.append(urls)
-    app.input_buffer.text = "https://a.com/1https://b.com/2"
+    app.input_buffer.text = "https://youtu.be/1https://soundcloud.com/a/2"
     app._accept(app.input_buffer)
-    assert submitted == [["https://a.com/1", "https://b.com/2"]]
+    assert submitted == [["https://youtu.be/1", "https://soundcloud.com/a/2"]]
+
+
+def test_unsupported_url_denied(app):
+    submitted = []
+    app.submit_urls = lambda urls: submitted.append(urls)
+    app.input_buffer.text = "https://vimeo.com/123"
+    app._accept(app.input_buffer)
+    assert submitted == []

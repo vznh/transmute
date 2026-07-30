@@ -23,7 +23,7 @@ from prompt_toolkit.layout.dimension import Dimension
 
 from .commands import Commands
 from .config import HISTORY_FILE, MAX_WORKERS, Settings
-from .downloader import Job, download_job, extract_urls
+from .downloader import Job, download_job, extract_urls, is_supported_url
 from .enrich import Enricher, TrackTags, apply_tags
 from .keys import build_key_bindings
 from .layout import build_layout
@@ -427,14 +427,15 @@ class App:
             if job.status != "done":
                 with self.lock:
                     self.failed.append(job)
-                self.add_entry(
-                    Entry(
-                        "class:err",
-                        f"✘ {job.url[:44]}  {job.error or 'unknown error'} — ↑ + enter to retry",
-                        "err",
-                        job,
-                    )
-                )
+                # Only retryable failures become selectable "err" entries;
+                # retrying an unsupported site or deleted video can't succeed.
+                if job.retryable:
+                    line = f"✘ {job.url[:44]}  {job.error or 'unknown error'} — ↑ + enter to retry"
+                    kind = "err"
+                else:
+                    line = f"✘ {job.url[:44]}  {job.error or 'unknown error'}"
+                    kind = "info"
+                self.add_entry(Entry("class:err", line, kind, job))
                 return
 
             desc = tags = None
@@ -522,6 +523,8 @@ class App:
             return False
         if text.startswith("/"):
             self.commands.dispatch(text)
+            if text.split(maxsplit=1)[0].lower() == "/key":
+                buff.text = "/key"  # never append a pasted key to command history
             return False
 
         urls = extract_urls(text)
@@ -530,7 +533,23 @@ class App:
                 "class:dim", "that doesn't look like a link — paste a URL or type /help"
             )
             return False
-        self.submit_urls(urls)
+        # Gate on source: only hosts yt-dlp can extract audio from. To accept a
+        # new media source, extend SUPPORTED_HOSTS in downloader.py — not here.
+        supported = [u for u in urls if is_supported_url(u)]
+        if not supported:
+            self.msg(
+                "class:err", "only YouTube and SoundCloud links are supported"
+            )
+            return False
+        rejected = len(urls) - len(supported)
+        if rejected:
+            self.msg(
+                "class:warn",
+                f"ignored {rejected} unsupported "
+                f"link{'s' if rejected != 1 else ''} — "
+                "only YouTube and SoundCloud are supported",
+            )
+        self.submit_urls(supported)
         return False  # False → clear the input line (and append to history)
 
     def _accept_hint(self, buff: Buffer) -> bool:

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.key_binding import KeyBindings
+
+
+def _exit_shortcut() -> str:
+    return "CMD + C" if sys.platform == "darwin" else "CTRL + C"
 
 
 def build_key_bindings(app) -> KeyBindings:
@@ -84,7 +89,7 @@ def build_key_bindings(app) -> KeyBindings:
             )
             app.show_input_notice(
                 "class:input.warn",
-                f"press ctrl-c again to exit{note}",
+                f"press {_exit_shortcut()} to exit{note}",
                 duration=2.0,
             )
 

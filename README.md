@@ -6,6 +6,8 @@ Convert YouTube or SoundCloud links into rich MP3s, from an interactive REPL.
 
 - [uv](https://docs.astral.sh/uv/) (manages Python + deps)
 - ffmpeg (`brew install ffmpeg`)
+- Claude Code signed in with Claude, or Codex CLI signed in with ChatGPT, for
+  subscription-backed metadata enrichment
 
 ## Run
 
@@ -25,20 +27,30 @@ at 320kbps with embedded metadata and cover art, to `~/Downloads` by default.
 
 ## Metadata enrichment
 
-After each download, Transmute runs a Claude web search to find the track's canonical
-metadata — artist, title, album, release year, genre. Tags are written into the MP3
-(cover art is preserved) and the file is renamed to `Artist - Title.mp3`.
+After each download, Transmute runs a provider-backed web search to find the track's
+canonical metadata — artist, title, album, release year, genre. Tags are written into
+the MP3 (cover art is preserved) and the file is renamed to
+`Artist - Title.mp3`.
 
 Auth (in order of preference):
 
-1. **Claude subscription** (recommended) — if the `claude` CLI (Claude Code) is
-   installed and logged in, enrichment runs through it headlessly and bills your
-   Pro/Max subscription. To log in: run `claude`, type `/login`, and choose
-   "Claude account with subscription". No API key needed.
-2. **API key** — if `ANTHROPIC_API_KEY` is set, the Anthropic SDK is used instead
-   (billed as API usage). An exported key takes precedence over the subscription.
+1. **Entered API key** — run `/key` to open a masked prompt. It accepts one
+   OpenAI `sk-…` or Anthropic `sk-ant-…` key, auto-detects the provider, and
+   replaces any previously entered key. The key stays in memory only and is
+   never written to Transmute's command history. Use `/key clear` to remove it.
+2. **Environment API key** — `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is selected
+   automatically. If both are set, OpenAI takes priority. API usage is billed
+   separately by the detected provider.
+3. **Claude subscription** (recommended) — if the local `claude` CLI is installed,
+   Transmute uses its Claude subscription auth. Run `/login` or `/login claude` to
+   sign in.
+4. **ChatGPT subscription** — when Claude is unavailable, Transmute runs an
+   ephemeral, read-only `codex exec` lookup with live web search and local shell
+   access disabled. Run `/login codex` once to sign in with ChatGPT.
 
-Toggle with `/enrich on|off`; with no credentials, enrichment is skipped automatically.
+Choose a provider with `/enrich codex|claude|api`, or toggle the selected provider
+with `/enrich on|off`. With no usable credentials, enrichment is skipped
+automatically.
 
 ## Commands
 
@@ -46,12 +58,13 @@ Toggle with `/enrich on|off`; with no credentials, enrichment is skipped automat
 | --- | --- |
 | `/out [dir]` | show the output directory; with no arg, opens an inline prompt (pre-filled with `~/`) to change it — enter/esc keeps it |
 | `/quality [128\|192\|256\|320]` | show or set MP3 bitrate |
-| `/enrich [on\|off]` | toggle web-search metadata enrichment |
+| `/enrich [codex\|claude\|api\|on\|off]` | choose or toggle web-search metadata enrichment |
+| `/key [clear]` | securely enter one OpenAI or Anthropic API key, or clear it |
 | `↑` / `↓` | select failed or low-confidence History entries — Enter retries a failure; low-confidence entries open an inline hint input |
 | `/list` | show tracks converted this session |
 | `/retry` | requeue failed downloads |
-| `/login` | log in to Claude (subscription — opens browser) |
-| `/logout` | log out of Claude (disables enrichment) |
+| `/login [codex\|claude]` | log in to a subscription provider (opens browser) |
+| `/logout [codex\|claude]` | log out of a subscription provider |
 | `/clear` | clear the screen |
 | `/quit` | exit (or Ctrl-D / double Ctrl-C) |
 

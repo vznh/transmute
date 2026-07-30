@@ -41,7 +41,7 @@ def build_layout(app) -> Layout:
             input_processors=[PlaceholderProcessor(app._input_placeholder)],
         ),
         height=1,
-        get_line_prefix=lambda line_no, wrap_count: app._input_prefix(),
+        get_line_prefix=lambda _line_no, _wrap_count: app._input_prefix(),
     )
     hint_window = Window(
         BufferControl(
@@ -49,7 +49,7 @@ def build_layout(app) -> Layout:
             input_processors=[PlaceholderProcessor(HINT_PLACEHOLDER)],
         ),
         height=1,
-        get_line_prefix=lambda line_no, wrap_count: [("class:prompt", "      ↳ ")],
+        get_line_prefix=lambda _line_no, _wrap_count: [("class:prompt", "      ↳ ")],
     )
 
     root = HSplit(
