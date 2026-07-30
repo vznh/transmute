@@ -181,3 +181,4 @@ Tests
 - `tests/test_enrich.py` — credentials, provider calls, tagging, and renaming
 - `tests/test_settings.py` — settings round-trip, rejection, and fallback
 - `tests/test_history.py` — activity storage, retry/hint claiming, session recovery
+- `tests/test_packaging.py` — Homebrew resource closure derived from `uv.lock`

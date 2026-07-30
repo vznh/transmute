@@ -36,6 +36,10 @@ transmute = "transmute.main:main"
 dev = [
     "pytest>=8",
     "ruff>=0.8",
+    # Marker evaluation in packaging/homebrew/generate_formula.py.
+    "packaging>=24",
+    # tomllib backport; the formula generator reads uv.lock on Python 3.10.
+    "tomli>=2; python_version < '3.11'",
 ]
 
 [build-system]

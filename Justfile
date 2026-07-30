@@ -14,3 +14,7 @@ lint:
     uv run ruff check .
 
 check: test lint
+
+# Regenerate the Homebrew formula after a dependency or version change.
+formula:
+    uv run python packaging/homebrew/generate_formula.py --write
