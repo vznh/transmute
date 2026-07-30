@@ -119,15 +119,48 @@ as `just run`, `just test`, `just lint`, and `just check`.
 
 ## Project map
 
-- `transmute/app.py` — application state and the download/enrichment pipeline
+`App` owns session state and orchestration. The interface modules read that
+state and translate gestures into `App` calls; the services below run without
+prompt_toolkit and return data rather than rendering it.
+
+```text
+main
+  └── App (state + orchestration)
+        ├── prompt_toolkit adapters (layout, keys, commands, widgets, style)
+        ├── downloader (yt-dlp/ffmpeg)
+        ├── enrich (provider calls + normalized tags + ID3 writes)
+        └── settings, history (durable local storage)
+```
+
+Entry point
+
+- `transmute/main.py` — process startup and wiring
+- `transmute/__main__.py` — supports `python -m transmute`
+
+Core
+
+- `transmute/app.py` — session state, job lifecycle, and worker coordination
+- `transmute/config.py` — settings model and shared operational constants
+
+Interface
+
 - `transmute/layout.py` — prompt_toolkit window arrangement
 - `transmute/keys.py` — keyboard behavior
 - `transmute/commands.py` — slash-command dispatch and implementations
 - `transmute/widgets.py` — reusable prompt components
 - `transmute/style.py` — theme and user-facing UI constants
-- `transmute/config.py` — settings and shared operational constants
+
+Services
+
+- `transmute/downloader.py` — local yt-dlp/ffmpeg pipeline
+- `transmute/enrich.py` — provider selection, web research, and ID3 tagging
 - `transmute/settings.py` — persistent output directory and bitrate storage
 - `transmute/history.py` — persistent download activity storage
-- `transmute/downloader.py` — local yt-dlp/ffmpeg service
-- `transmute/enrich.py` — provider selection, web research, and ID3 tagging
-- `tests/` — state-machine and service tests
+
+Tests
+
+- `tests/test_app.py` — selection, retry, modal, queue, and notice state
+- `tests/test_downloader.py` — URL parsing, yt-dlp options, and error classification
+- `tests/test_enrich.py` — credentials, provider calls, tagging, and renaming
+- `tests/test_settings.py` — settings round-trip, rejection, and fallback
+- `tests/test_history.py` — activity storage, retry/hint claiming, session recovery
