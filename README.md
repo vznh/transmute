@@ -10,7 +10,9 @@ You can do any of the two options:
 - Bring your own API key (only Codex, Claude supported for now)
 2. Provide a correct URL
   
-We support only https://[youtube.com, soundcloud.com] links.  
+We support `youtube.com`, `youtu.be`, and `soundcloud.com` links, including
+subdomains like `music.youtube.com`. Anything else is turned away as you paste it,
+rather than failing later mid-download.
 
 3. Ensure you output to the right directory using `/out`
 
@@ -44,12 +46,25 @@ live at the bottom, so keep pasting while earlier tracks convert. A status bar b
 the prompt shows the output dir, bitrate, and active/queued work. MP3s are written
 at 320kbps with embedded metadata and cover art, to `~/Downloads` by default.
 
+Unsupported links are rejected as you paste them; if a paste mixes supported and
+unsupported links, the supported ones are queued and the rest are reported as
+ignored. When a download does fail, the reason is summarized in a line you can act
+on — `ffmpeg missing — brew install ffmpeg`, `requires login — needs browser
+cookies`, `not available in your region`. Failures that retrying cannot fix, like a
+private or removed video, are marked non-retryable and left out of `/retry`.
+
 ## History and persistence
 
 Prompt recall and structured download activity persist locally across restarts.
 Recent completed and failed tracks are restored when Transmute opens; restored
 failures can be retried and restored low-confidence entries can receive hints just
 like entries from the current session. `/list` includes recent persisted tracks.
+
+If Transmute is killed mid-download, the next launch notices the interrupted
+session and turns whatever was still in flight into a retryable failure
+(`interrupted — retry when ready`) instead of losing it. Several instances can run
+at once against the same storage: a retry or a hint is claimed by exactly one of
+them, and starting one does not disturb work already running in another.
 
 Your output directory and bitrate also persist. `/out` and `/quality` are saved to
 `~/.transmute/settings.json` and restored on the next launch. A runtime command in
@@ -100,12 +115,13 @@ automatically.
 | `/enrich [codex\|claude\|api\|on\|off]` | choose or toggle web-search metadata enrichment |
 | `/key [clear]` | securely enter one OpenAI or Anthropic API key, or clear it |
 | `↑` / `↓` | select failed or low-confidence History entries — Enter retries a failure; low-confidence entries open an inline hint input |
-| `/list` | show recent converted tracks, including persisted results |
-| `/retry` | requeue failed downloads |
+| `/list` | show recent converted and failed tracks across sessions |
+| `/retry` | requeue all retryable failed downloads |
 | `/login [codex\|claude]` | log in to a subscription provider (opens browser) |
 | `/logout [codex\|claude]` | log out of a subscription provider |
 | `/clear` | clear completed and failed activity from the screen and persistent history |
-| `/quit` | exit (or Ctrl-D / double Ctrl-C) |
+| `/help` | show the full command reference on screen |
+| `/quit` | exit (also `/exit`, `/q`, Ctrl-D, or double Ctrl-C) |
 
 ## Development
 
@@ -119,15 +135,48 @@ as `just run`, `just test`, `just lint`, and `just check`.
 
 ## Project map
 
-- `transmute/app.py` — application state and the download/enrichment pipeline
+`App` owns session state and orchestration. The interface modules read that
+state and translate gestures into `App` calls; the services below run without
+prompt_toolkit and return data rather than rendering it.
+
+```text
+main
+  └── App (state + orchestration)
+        ├── prompt_toolkit adapters (layout, keys, commands, widgets, style)
+        ├── downloader (yt-dlp/ffmpeg)
+        ├── enrich (provider calls + normalized tags + ID3 writes)
+        └── settings, history (durable local storage)
+```
+
+Entry point
+
+- `transmute/main.py` — process startup and wiring
+- `transmute/__main__.py` — supports `python -m transmute`
+
+Core
+
+- `transmute/app.py` — session state, job lifecycle, and worker coordination
+- `transmute/config.py` — settings model and shared operational constants
+
+Interface
+
 - `transmute/layout.py` — prompt_toolkit window arrangement
 - `transmute/keys.py` — keyboard behavior
 - `transmute/commands.py` — slash-command dispatch and implementations
 - `transmute/widgets.py` — reusable prompt components
 - `transmute/style.py` — theme and user-facing UI constants
-- `transmute/config.py` — settings and shared operational constants
+
+Services
+
+- `transmute/downloader.py` — local yt-dlp/ffmpeg pipeline
+- `transmute/enrich.py` — provider selection, web research, and ID3 tagging
 - `transmute/settings.py` — persistent output directory and bitrate storage
 - `transmute/history.py` — persistent download activity storage
-- `transmute/downloader.py` — local yt-dlp/ffmpeg service
-- `transmute/enrich.py` — provider selection, web research, and ID3 tagging
-- `tests/` — state-machine and service tests
+
+Tests
+
+- `tests/test_app.py` — selection, retry, modal, queue, and notice state
+- `tests/test_downloader.py` — URL parsing, yt-dlp options, and error classification
+- `tests/test_enrich.py` — credentials, provider calls, tagging, and renaming
+- `tests/test_settings.py` — settings round-trip, rejection, and fallback
+- `tests/test_history.py` — activity storage, retry/hint claiming, session recovery
