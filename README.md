@@ -115,12 +115,13 @@ automatically.
 | `/enrich [codex\|claude\|api\|on\|off]` | choose or toggle web-search metadata enrichment |
 | `/key [clear]` | securely enter one OpenAI or Anthropic API key, or clear it |
 | `↑` / `↓` | select failed or low-confidence History entries — Enter retries a failure; low-confidence entries open an inline hint input |
-| `/list` | show recent converted tracks, including persisted results |
-| `/retry` | requeue failed downloads |
+| `/list` | show recent converted and failed tracks across sessions |
+| `/retry` | requeue all retryable failed downloads |
 | `/login [codex\|claude]` | log in to a subscription provider (opens browser) |
 | `/logout [codex\|claude]` | log out of a subscription provider |
 | `/clear` | clear completed and failed activity from the screen and persistent history |
-| `/quit` | exit (or Ctrl-D / double Ctrl-C) |
+| `/help` | show the full command reference on screen |
+| `/quit` | exit (also `/exit`, `/q`, Ctrl-D, or double Ctrl-C) |
 
 ## Development
 
