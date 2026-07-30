@@ -491,10 +491,19 @@ def test_status_line_shows_labeled_settings_after_hint(app, tmp_path):
     app.set_out_dir(tmp_path / "Music")
     app.set_quality("192")
 
-    assert app._status_line() == app._input_hint() + app._toolbar()
+    assert app._status_line() == [*app._input_hint(), ("", "  "), *app._toolbar()]
     toolbar_text = "".join(chunk for _, chunk in app._toolbar())
     assert f"out {tmp_path / 'Music'}" in toolbar_text
     assert "q 192k" in toolbar_text
+
+
+def test_toolbar_highlight_does_not_pad_before_its_text(app):
+    """The gap between the hint and the toolbar must be unstyled, so the
+    toolbar background doesn't extend two blank cells before "out"."""
+    highlighted = [text for style, text in app._status_line() if "toolbar" in style]
+
+    assert highlighted == [app._toolbar()[0][1]]
+    assert not highlighted[0].startswith("  ")
 
 
 def test_settings_persist_across_app_instances(tmp_path, monkeypatch):
