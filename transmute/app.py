@@ -142,8 +142,9 @@ class App:
 
         if msgs:
             cur.append(rule)
+            cur.append(("class:subsection", "  Logs\n"))
             for style, line in msgs:
-                cur.append((style, f"  {line[:width]}\n"))
+                cur.append((style, f"    {line[:width]}\n"))
         return above, below
 
     def _render_above(self):
