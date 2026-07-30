@@ -1,0 +1,62 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Every version the package claims to support in requires-python.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --python ${{ matrix.python-version }}
+      - run: uv run pytest
+      - run: uv run ruff check .
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # OIDC token for PyPI Trusted Publishing; no API token is stored anywhere.
+      id-token: write
+      # Creating the GitHub release that the Homebrew formula can point at.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - run: uv build
+
+      - name: Verify the tag matches the built version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ ! -f "dist/transmute_cli-${version}.tar.gz" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match transmute/__init__.py; built:" >&2
+            ls dist >&2
+            exit 1
+          fi
+
+      - run: uv publish --trusted-publishing always
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/transmute_cli-${version}.tar.gz" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
