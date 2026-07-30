@@ -21,7 +21,7 @@ from prompt_toolkit.layout.dimension import Dimension
 
 from .commands import Commands
 from .config import HISTORY_FILE, MAX_WORKERS, Settings
-from .downloader import Job, download_job, extract_urls
+from .downloader import Job, download_job, extract_urls, is_supported_url
 from .enrich import Enricher, TrackTags, apply_tags
 from .keys import build_key_bindings
 from .layout import build_layout
@@ -425,7 +425,23 @@ class App:
                 "class:dim", "that doesn't look like a link — paste a URL or type /help"
             )
             return False
-        self.submit_urls(urls)
+        # Gate on source: only hosts yt-dlp can extract audio from. To accept a
+        # new media source, extend SUPPORTED_HOSTS in downloader.py — not here.
+        supported = [u for u in urls if is_supported_url(u)]
+        if not supported:
+            self.msg(
+                "class:err", "only YouTube and SoundCloud links are supported"
+            )
+            return False
+        rejected = len(urls) - len(supported)
+        if rejected:
+            self.msg(
+                "class:warn",
+                f"ignored {rejected} unsupported "
+                f"link{'s' if rejected != 1 else ''} — "
+                "only YouTube and SoundCloud are supported",
+            )
+        self.submit_urls(supported)
         return False  # False → clear the input line (and append to history)
 
     def _accept_hint(self, buff: Buffer) -> bool:

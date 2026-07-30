@@ -229,6 +229,14 @@ def test_ctrl_c_warns_with_platform_shortcut_then_exits(app, monkeypatch, platfo
 def test_url_paste_submits(app):
     submitted = []
     app.submit_urls = lambda urls: submitted.append(urls)
-    app.input_buffer.text = "https://a.com/1https://b.com/2"
+    app.input_buffer.text = "https://youtu.be/1https://soundcloud.com/a/2"
     app._accept(app.input_buffer)
-    assert submitted == [["https://a.com/1", "https://b.com/2"]]
+    assert submitted == [["https://youtu.be/1", "https://soundcloud.com/a/2"]]
+
+
+def test_unsupported_url_denied(app):
+    submitted = []
+    app.submit_urls = lambda urls: submitted.append(urls)
+    app.input_buffer.text = "https://vimeo.com/123"
+    app._accept(app.input_buffer)
+    assert submitted == []

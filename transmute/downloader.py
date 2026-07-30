@@ -34,6 +34,36 @@ _ERROR_PATTERNS: list[tuple[str, str, bool]] = [
     ("unable to download", "network error — download failed", True),
 ]
 
+# Hosts we can actually download from. Subdomains (www., m., music., on., …)
+# are matched too, so e.g. music.youtube.com and on.soundcloud.com are allowed.
+#
+# TO ADD A NEW MEDIA SOURCE: append its bare registrable domain here (e.g.
+# "bandcamp.com", "vimeo.com"). That is the single choke point — is_supported_url
+# and the input gate in App._accept both read from this tuple, so no other code
+# needs to change to widen what the app accepts. Only add a host once yt-dlp can
+# actually extract audio from it, otherwise links pass the gate and fail later at
+# download time.
+SUPPORTED_HOSTS = ("youtube.com", "youtu.be", "soundcloud.com")
+
+
+def is_supported_url(url: str) -> bool:
+    """True only for links to a supported media source (see SUPPORTED_HOSTS).
+
+    We gate input up front rather than letting anything ``http(s)://`` through
+    for two reasons: the download pipeline is built around yt-dlp audio
+    extraction, which only works for known media hosts, and rejecting an
+    unsupported paste immediately gives the user a clear message instead of a
+    cryptic failure minutes later. Matching is anchored to each host's registrable
+    domain (``host == h`` or ``host.endswith("." + h)``) so subdomains like
+    ``music.youtube.com`` are accepted while look-alikes like
+    ``youtube.com.evil.com`` are not.
+
+    To support a new format/source, add its host to SUPPORTED_HOSTS above; this
+    function and the App._accept input gate pick it up automatically.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in SUPPORTED_HOSTS)
+
 
 @dataclass
 class Job:
