@@ -298,12 +298,17 @@ class App:
             active = len(self.active)
             queued = self.queued
             settings = self.settings
-        parts = [str(settings.out_dir), f"{settings.quality}k"]
+        parts = [f"out {settings.out_dir}", f"q {settings.quality}k"]
         if active:
             parts.append(f"{active} active")
         if queued:
             parts.append(f"{queued} queued")
         return [("class:toolbar", "  " + "  ·  ".join(parts) + " ")]
+
+    def _status_line(self):
+        """The bottom row: the contextual input hint, then the status toolbar
+        (labeled output directory and bitrate) on the same line."""
+        return self._input_hint() + self._toolbar()
 
     def _input_prefix(self):
         """Prompt-line prefix fragments. The picker's "~/" is rendered here

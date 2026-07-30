@@ -76,8 +76,7 @@ def build_layout(app, history_file: Path) -> Layout:
             ),
             Window(height=1, char="─", style="class:rule"),
             input_window,
-            Window(FormattedTextControl(app._input_hint), height=1),
-            Window(FormattedTextControl(app._toolbar), height=1),
+            Window(FormattedTextControl(app._status_line), height=1),
         ]
     )
     root = FloatContainer(
