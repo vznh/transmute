@@ -10,9 +10,12 @@ Convert YouTube or SoundCloud links into rich MP3s, from an interactive REPL.
 ## Run
 
 ```sh
-cd cli
+uv sync
 uv run transmute
 ```
+
+Run both commands from the repository root. After the first `uv sync`, starting
+Transmute only requires `uv run transmute`.
 
 Paste one or more links (even concatenated back-to-back) and hit Enter. Links are
 queued and processed in the background (up to 4 at a time) — the input line stays
@@ -50,4 +53,27 @@ Toggle with `/enrich on|off`; with no credentials, enrichment is skipped automat
 | `/login` | log in to Claude (subscription — opens browser) |
 | `/logout` | log out of Claude (disables enrichment) |
 | `/clear` | clear the screen |
-| `/quit` | exit (or ctrl-d) |
+| `/quit` | exit (or Ctrl-D / double Ctrl-C) |
+
+## Development
+
+```sh
+uv run pytest
+uv run ruff check .
+```
+
+If [`just`](https://just.systems/) is installed, the same workflows are available
+as `just run`, `just test`, `just lint`, and `just check`.
+
+## Project map
+
+- `transmute/app.py` — application state and the download/enrichment pipeline
+- `transmute/layout.py` — prompt_toolkit window arrangement
+- `transmute/keys.py` — keyboard behavior
+- `transmute/commands.py` — slash-command dispatch and implementations
+- `transmute/widgets.py` — reusable prompt components
+- `transmute/style.py` — theme and user-facing UI constants
+- `transmute/config.py` — settings and shared operational constants
+- `transmute/downloader.py` — local yt-dlp/ffmpeg service
+- `transmute/enrich.py` — provider selection, web research, and ID3 tagging
+- `tests/` — state-machine and service tests
