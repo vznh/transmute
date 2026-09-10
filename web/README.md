@@ -24,6 +24,18 @@ The development server proxies `/api` to the loopback helper.
 
 ## Boundaries
 
+### Branding and search metadata
+
+`public/transmute-logo.png` is the supplied Transmute logo, used without alteration
+in the header, browser icon and touch icon. The site name is **Transmute**.
+Page title, description and Open Graph/X metadata are defined in `app/layout.tsx`.
+Set `TRANSMUTE_SITE_URL` to the real public HTTPS URL when building to emit the
+canonical URL and absolute social-image URLs using this same logo. Without it,
+those URLs are omitted so the private preview address is never advertised as the
+public site. The authenticated local preview itself is not a public SEO deployment.
+
+### Conversion
+
 - The Python helper retrieves source audio with the existing yt-dlp dependency;
   it does not encode audio or instantiate the Transmute application or Enricher.
 - The browser encodes to MP3 with ffmpeg.wasm in a worker, then provides a Save MP3

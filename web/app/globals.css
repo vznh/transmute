@@ -21,8 +21,7 @@ button, input { font: inherit; }
 .page-shell { min-height: 100svh; padding: 0 30%; display: flex; flex-direction: column; }
 .masthead { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 36px 0; border-bottom: 1px solid var(--border); }
 .wordmark { display: flex; align-items: center; gap: 9px; text-decoration: none; font-weight: 700; font-size: 22px; letter-spacing: -1px; }
-.wordmark svg, .wordmark-dot { color: var(--primary); }
-.wordmark-dot { margin-left: -8px; }
+.brand-logo { width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; }
 .edition { font: 11px/1.5 monospace; letter-spacing: .09em; color: var(--muted-foreground); }
 main { padding: 62px 0 42px; }
 .eyebrow { display: flex; gap: 9px; align-items: center; color: #7dd3fc; font: 12px/1.5 monospace; letter-spacing: .1em; }

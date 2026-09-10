@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowDownToLine, ArrowRight, AudioLines, Check, Link2, LoaderCircle } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, Check, Link2, LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -134,7 +134,7 @@ export default function Home() {
   return (
     <div className="page-shell">
       <header className="masthead">
-        <a className="wordmark" href="/" aria-label="Transmute home"><AudioLines aria-hidden="true" size={24} />transmute<span className="wordmark-dot">.</span></a>
+        <a className="wordmark" href="/" aria-label="Transmute home"><img className="brand-logo" src="/transmute-logo.png" alt="" width={40} height={40} />Transmute</a>
         <span className="edition">WEB / PROTOTYPE</span>
       </header>
       <main>
