@@ -176,6 +176,15 @@ automatically.
 
 ## Development
 
+### Browser prototype
+
+The optional [web prototype](web/README.md) provides a basic YouTube/SoundCloud
+link-to-MP3 interface without enrichment. A local helper retrieves source audio;
+the browser converts it to MP3. It is a checkout-only prototype, not a hosted
+service, and does not change the terminal application.
+
+### Checks
+
 ```sh
 uv run pytest
 uv run ruff check .

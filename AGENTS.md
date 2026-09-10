@@ -184,6 +184,16 @@ main
   package namespaces, and lifecycle hooks wait for an explicit extension use
   case.
 
+### Browser prototype boundary
+
+`web/` is a checkout-only interface experiment. `web/source.py` retrieves bounded
+source audio with yt-dlp; `web/helper.py` owns loopback HTTP transport, subprocess
+deadlines and temporary-file cleanup. The page encodes MP3 in a browser worker.
+It never instantiates `App` or `Enricher` and does not write terminal history or
+settings. The Python package and Homebrew formula do not distribute this prototype.
+Its offline boundary tests live in `tests/test_web.py`. Public hosting of the
+helper remains a separate operational and product decision under P1/P2.
+
 ## 6. Application state and concurrency
 
 - **C1 — Give session state one owner.** `App` is the source of truth for

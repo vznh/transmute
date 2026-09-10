@@ -1,0 +1,7 @@
+import { mkdir, copyFile } from 'node:fs/promises';
+const destination = new URL('../public/ffmpeg/', import.meta.url);
+await mkdir(destination, { recursive: true });
+for (const name of ['ffmpeg-core.js', 'ffmpeg-core.wasm']) {
+  // FFmpeg's browser worker uses module imports and requires the ESM default export.
+  await copyFile(new URL(`../node_modules/@ffmpeg/core/dist/esm/${name}`, import.meta.url), new URL(name, destination));
+}
