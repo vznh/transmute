@@ -103,6 +103,13 @@ databases' credited artist and era). Being the uploader or host is not evidence 
 authorship; only as a last resort, when attribution is genuinely unknowable, fall \
 back to the uploader name and mark confidence "low".
 
+STEP 4 — Clean the names. "title" and "album" are the song and release names only. \
+Drop release-status, leak, and file-quality markers — e.g. "unreleased", "prev. \
+unreleased", "leak", "leaked", "snippet", "OG", "OG file", "CDQ", "HQ", "LQ", "full \
+version", "(unreleased 2019)" — along with any brackets or separators they leave \
+empty. Keep credits that identify a distinct recording, such as "remix", "sped up", \
+or "reprod.".
+
 Respond with ONLY a JSON object, no other text:
 {{"kind": "original"|"reupload"|"derivative", "based_on": str|null, "artist": str, \
 "title": str, "album": str|null, "album_artist": str|null, "year": str|null, \

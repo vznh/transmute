@@ -394,6 +394,31 @@ def test_lookup_rejects_incomplete_metadata(monkeypatch):
     assert "metadata reply missing fields" in enricher.last_error
 
 
+def test_lookup_prompt_asks_to_strip_release_status_markers(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    enricher = Enricher()
+    enricher.use_backend("codex")
+    prompts = []
+
+    def ask(prompt):
+        prompts.append(prompt)
+        return None
+
+    monkeypatch.setattr(enricher, "_ask_codex", ask)
+
+    enricher.lookup(
+        title="Artist - Song [UNRELEASED] (CDQ)",
+        uploader="leaks",
+        duration=180,
+        url="https://example.com/song",
+    )
+
+    assert "- title: Artist - Song [UNRELEASED] (CDQ)" in prompts[0]
+    assert "STEP 4 — Clean the names." in prompts[0]
+    assert '"unreleased"' in prompts[0] and '"CDQ"' in prompts[0]
+
+
 def test_lookup_rejects_unexpected_metadata_fields(monkeypatch):
     payload = {
         "kind": "original",
