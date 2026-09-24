@@ -3,8 +3,8 @@ class Transmute < Formula
 
   desc "Convert YouTube or SoundCloud links into rich MP3s"
   homepage "https://github.com/vznh/transmute"
-  url "https://github.com/vznh/transmute/archive/refs/tags/0.2a.tar.gz"
-  sha256 "18378aa757680aad6b50695515513eac4075139223769232cf32f88dcc3e8b88"
+  url "https://github.com/vznh/transmute/archive/refs/tags/0.2.1a.tar.gz"
+  sha256 "2f490db69442dc5e2cd3f2af1d1ebd4710b0ae21513ab4fba16608d2c4efd595"
   license "GPL-3.0-or-later"
   head "https://github.com/vznh/transmute.git", branch: "main"
 
@@ -122,8 +122,8 @@ class Transmute < Formula
   end
 
   resource "yt-dlp" do
-    url "https://files.pythonhosted.org/packages/47/c5/9972af4b472b0d55badf841ebafd2f98944cb0ae0f46e11d01f363ea5b91/yt_dlp-2026.7.4.tar.gz"
-    sha256 "b094813404f87a9dd2186f00815231df32e5fd8a5403be0f807b3bb2d21a4432"
+    url "https://files.pythonhosted.org/packages/1e/e0/832fa4ca334b766a06933a196066edc3dba37cdb6f14cd98d59bcc69a4b4/yt_dlp-2026.8.19.tar.gz"
+    sha256 "9e213e48cea35c66b378e4447903f118f6392a5fa380a2b6d7070ec86f4e0af1"
   end
 
   def install
@@ -137,7 +137,7 @@ class Transmute < Formula
     # The literal version is asserted rather than Homebrew's `version`, which is
     # parsed from the url: PyPI normalises "0.2a" to "0.2a0" in the filename
     # while the console script reports __version__ verbatim.
-    assert_match "transmute 0.2a", shell_output("#{bin}/transmute --version")
+    assert_match "transmute 0.2.1a", shell_output("#{bin}/transmute --version")
     assert_match "usage: transmute", shell_output("#{bin}/transmute --help")
   end
 end
