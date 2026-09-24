@@ -13,6 +13,129 @@ from transmute.enrich import (
     _safe_filename,
     apply_tags,
 )
+from transmute.enrich import _probe_claude as real_probe_claude
+from transmute.enrich import _probe_codex as real_probe_codex
+
+
+def test_claude_probe_parses_status_and_handles_bad_json(monkeypatch):
+    monkeypatch.setattr("transmute.enrich.shutil.which", lambda _name: "/bin/claude")
+    monkeypatch.setattr(
+        "transmute.enrich.subprocess.run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 0, '{"loggedIn": true}', ""),
+    )
+    assert real_probe_claude() == "signed_in"
+    monkeypatch.setattr(
+        "transmute.enrich.subprocess.run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 1, '{"loggedIn": false}', ""),
+    )
+    assert real_probe_claude() == "signed_out"
+    monkeypatch.setattr(
+        "transmute.enrich.subprocess.run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 1, "private@example.org", ""),
+    )
+    assert real_probe_claude() == "unknown"
+
+
+def test_cli_probes_missing_timeout_codex_status_and_security_args(monkeypatch):
+    import tempfile
+    from subprocess import TimeoutExpired
+
+    monkeypatch.setattr("transmute.enrich.shutil.which", lambda _name: None)
+    assert real_probe_claude() == real_probe_codex() == "missing"
+    monkeypatch.setattr("transmute.enrich.shutil.which", lambda _name: "/bin/cli")
+    monkeypatch.setattr(
+        "transmute.enrich.subprocess.run",
+        Mock(side_effect=TimeoutExpired("claude", 10)),
+    )
+    assert real_probe_claude() == "unknown"
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return CompletedProcess(args, 1, "Not logged in", "WARNING: proceeding")
+
+    monkeypatch.setattr("transmute.enrich.subprocess.run", run)
+    monkeypatch.setenv("CLAUDECODE", "parent")
+    monkeypatch.setenv("CODEX_SESSION", "parent")
+    monkeypatch.setenv("CODEX_HOME", "/tmp/codex-home")
+    assert real_probe_codex() == "signed_out"
+    args, kwargs = calls[0]
+    assert args == ["codex", "login", "status"]
+    assert kwargs["timeout"] == 10 and kwargs["check"] is False
+    assert kwargs["cwd"] == tempfile.gettempdir()
+    assert "CODEX_SESSION" not in kwargs["env"]
+    assert kwargs["env"]["CODEX_HOME"] == "/tmp/codex-home"
+
+    def claude_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return CompletedProcess(args, 0, '{"loggedIn": true}', "")
+
+    monkeypatch.setattr("transmute.enrich.subprocess.run", claude_run)
+    monkeypatch.setenv("CLAUDECODE", "parent")
+    assert real_probe_claude() == "signed_in"
+    args, kwargs = calls[-1]
+    assert args == ["claude", "auth", "status", "--json"]
+    assert kwargs["timeout"] == 10 and kwargs["check"] is False
+    assert "CLAUDECODE" not in kwargs["env"]
+
+    monkeypatch.setattr(
+        "transmute.enrich.subprocess.run",
+        lambda args, **kwargs: CompletedProcess(args, 0, "", ""),
+    )
+    assert real_probe_codex() == "signed_in"
+    monkeypatch.setattr(
+        "transmute.enrich.subprocess.run",
+        lambda args, **kwargs: CompletedProcess(args, 1, "Temporary outage", ""),
+    )
+    assert real_probe_codex() == "unknown"
+
+
+def test_selection_prefers_signed_in_codex_and_unknown_fallback(monkeypatch):
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "signed_out")
+    monkeypatch.setattr("transmute.enrich._probe_codex", lambda: "signed_in")
+    enricher = Enricher()
+    assert enricher.backend == "codex"
+    assert enricher.cli_states == {"claude": "signed_out", "codex": "signed_in"}
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "unknown")
+    monkeypatch.setattr("transmute.enrich._probe_codex", lambda: "signed_out")
+    assert Enricher().backend == "claude"
+
+
+def test_subscription_probe_is_lazy_and_refresh_obeys_opt_out_and_keys(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    codex = Mock(return_value="signed_in")
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "signed_in")
+    monkeypatch.setattr("transmute.enrich._probe_codex", codex)
+    enricher = Enricher()
+    codex.assert_not_called()
+    assert enricher.backend == "claude"
+
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "missing")
+    monkeypatch.setattr("transmute.enrich._probe_codex", lambda: "missing")
+    enricher = Enricher()
+    monkeypatch.setattr("transmute.enrich._probe_codex", lambda: "signed_in")
+    assert enricher.refresh_subscription() == "codex"
+    assert enricher.backend == "codex"
+
+    none = Enricher()
+    none.set_api_key("sk-proj-test")
+    assert none.refresh_subscription() is None
+    none = Enricher()
+    none.use_backend("codex")
+    assert none.refresh_subscription() is None
+    none = Enricher()
+    none.set_enrichment_enabled(False)
+    assert none.refresh_subscription() is None
+
+
+def test_refresh_keeps_rechecking_when_status_is_unknown(monkeypatch):
+    enricher = Enricher()
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "unknown")
+
+    assert enricher.refresh_subscription() is None
+    assert enricher.backend == "none"
+    assert enricher.needs_subscription_recheck
 
 
 def test_safe_filename_strips_reserved_chars():
@@ -128,16 +251,11 @@ def test_backend_selection_prefers_openai_then_anthropic_env_keys(monkeypatch):
 def test_backend_selection_prefers_claude_then_codex(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(
-        "transmute.enrich.shutil.which",
-        lambda name: f"/bin/{name}" if name in ("codex", "claude") else None,
-    )
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "signed_in")
+    monkeypatch.setattr("transmute.enrich._probe_codex", lambda: "signed_in")
     assert Enricher().backend == "claude"
 
-    monkeypatch.setattr(
-        "transmute.enrich.shutil.which",
-        lambda name: "/bin/codex" if name == "codex" else None,
-    )
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "missing")
     assert Enricher().backend == "codex"
 
 
@@ -172,10 +290,7 @@ def test_api_key_rejects_unknown_prefix_without_replacing_key():
 def test_clearing_entered_key_restores_subscription_backend(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(
-        "transmute.enrich.shutil.which",
-        lambda name: f"/bin/{name}" if name in ("codex", "claude") else None,
-    )
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "signed_in")
     enricher = Enricher()
     enricher.set_api_key("sk-ant-api03-test")
 

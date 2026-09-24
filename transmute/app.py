@@ -9,6 +9,7 @@ entries retry on Enter; low-confidence entries open an inline hint input.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import threading
 from collections import deque
@@ -28,6 +29,7 @@ from .config import (
     HISTORY_FILE,
     MAX_WORKERS,
     SETTINGS_FILE,
+    SIGNIN_RECHECK_SECONDS,
     STATE_DIR,
     Settings,
 )
@@ -404,6 +406,41 @@ class App:
         with self.lock:
             self.messages.append((style, line))
         self.refresh()
+
+    def _recheck_signin(self) -> str | None:
+        backend = self.enricher.refresh_subscription()
+        if backend is None:
+            return None
+        name = "Claude" if backend == "claude" else "Codex"
+        self.msg("class:ok", f"signed in to {name} — enrichment enabled")
+        return backend
+
+    def _startup_enrichment_notice(self) -> None:
+        if self.enricher.backend != "none":
+            return
+        for provider in ("claude", "codex"):
+            if self.enricher.cli_states.get(provider) == "signed_out":
+                label = "Claude" if provider == "claude" else "Codex"
+                self.msg(
+                    "class:warn",
+                    f"⚠ {label} is installed but not signed in — run /login {provider} "
+                    f"(checking every {SIGNIN_RECHECK_SECONDS}s)",
+                )
+                return
+
+    def _start_signin_recheck(self) -> None:
+        async def recheck_loop() -> None:
+            while self.enricher.needs_subscription_recheck:
+                await asyncio.sleep(SIGNIN_RECHECK_SECONDS)
+                try:
+                    future = self.pool.submit(self._recheck_signin)
+                    backend = await asyncio.wrap_future(future)
+                except Exception:  # noqa: BLE001
+                    return
+                if backend is not None:
+                    return
+
+        self.app.create_background_task(recheck_loop())
 
     def settings_snapshot(self) -> Settings:
         with self.lock:
@@ -1010,10 +1047,11 @@ class App:
                 "class:warn",
                 "⚠ ffmpeg not found — install it with: brew install ffmpeg",
             )
+        self._startup_enrichment_notice()
         drained = False
         try:
             try:
-                self.app.run()
+                self.app.run(pre_run=self._start_signin_recheck)
             except (EOFError, KeyboardInterrupt):
                 pass  # non-tty input ends with EOF; treat as a normal quit
 

@@ -12,6 +12,7 @@ SETTINGS_FILE = STATE_DIR / "settings.json"
 SETTINGS_VERSION = 1
 QUALITIES = ("128", "192", "256", "320")
 MAX_WORKERS = 4
+SIGNIN_RECHECK_SECONDS = 15
 
 
 @dataclass(frozen=True)

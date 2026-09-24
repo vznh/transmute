@@ -84,9 +84,9 @@ class Commands:
 
     def cmd_enrich(self, arg: str) -> None:
         if arg == "off":
-            self.app.enricher.enabled = False
+            self.app.enricher.set_enrichment_enabled(False)
         elif arg == "on":
-            self.app.enricher.enabled = True
+            self.app.enricher.set_enrichment_enabled(True)
         elif arg == "api":
             if not self.app.enricher.use_api_key():
                 self.app.msg("class:err", self.app.enricher.last_error)

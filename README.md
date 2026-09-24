@@ -146,12 +146,16 @@ Auth (in order of preference):
 2. **Environment API key** — `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is selected
    automatically. If both are set, OpenAI takes priority. API usage is billed
    separately by the detected provider.
-3. **Claude subscription** (recommended) — if the local `claude` CLI is installed,
-   Transmute uses its Claude subscription auth. Run `/login` or `/login claude` to
+3. **Claude subscription** (recommended) — when the local `claude` CLI is signed
+   in, Transmute uses its Claude subscription auth. Run `/login` or `/login claude` to
    sign in.
-4. **ChatGPT subscription** — when Claude is unavailable, Transmute runs an
+4. **ChatGPT subscription** — when Claude is not signed in, Transmute runs an
    ephemeral, read-only `codex exec` lookup with live web search and local shell
    access disabled. Run `/login codex` once to sign in with ChatGPT.
+
+Among subscription CLIs, Transmute picks the first signed-in CLI (Claude, then
+Codex). While neither is available, it checks sign-in status every 15 seconds and
+enables enrichment when one becomes available.
 
 Choose a provider with `/enrich codex|claude|api`, or toggle the selected provider
 with `/enrich on|off`. With no usable credentials, enrichment is skipped

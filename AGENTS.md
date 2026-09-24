@@ -97,8 +97,9 @@ Run every command from the repository root.
   `OPENAI_API_KEY` takes precedence over `ANTHROPIC_API_KEY`.
 - **S6 — Keep environment API usage explicit.** Environment keys select
   separately billed API backends; they are not subscription credentials.
-- **S7 — Preserve subscription fallback.** With no API key, prefer the installed
-  Claude CLI and then the installed Codex CLI.
+- **S7 — Preserve subscription fallback.** With no API key, prefer the signed-in
+  Claude CLI and then the signed-in Codex CLI; recheck every 15 seconds while
+  neither is usable unless enrichment was explicitly turned off.
 - **S8 — Keep missing credentials non-fatal.** If no backend is usable,
   enrichment is skipped with an actionable message; downloading still works.
 - **S9 — Never run `/logout` during validation.** This applies to automated

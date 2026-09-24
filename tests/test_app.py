@@ -54,6 +54,51 @@ def test_display_name_prefers_path(app):
     assert app._display_name(Job(url="u")) == "u"
 
 
+def test_recheck_signin_posts_one_success_message(app, monkeypatch):
+    monkeypatch.setattr(app.enricher, "refresh_subscription", lambda: "claude")
+    app.messages.clear()
+
+    assert app._recheck_signin() == "claude"
+    assert list(app.messages) == [
+        ("class:ok", "signed in to Claude — enrichment enabled")
+    ]
+
+
+def test_recheck_signin_is_silent_when_no_backend_available(app, monkeypatch):
+    monkeypatch.setattr(app.enricher, "refresh_subscription", lambda: None)
+    app.messages.clear()
+
+    assert app._recheck_signin() is None
+    assert not app.messages
+
+
+def test_startup_notice_names_signed_out_cli(app):
+    app.enricher.cli_states = {"claude": "signed_out", "codex": "signed_out"}
+    app.enricher.backend = "none"
+    app.messages.clear()
+
+    app._startup_enrichment_notice()
+
+    assert list(app.messages) == [
+        (
+            "class:warn",
+            "⚠ Claude is installed but not signed in — run /login claude (checking every 15s)",
+        )
+    ]
+
+
+def test_enrich_off_blocks_recheck_until_enrich_on(app, monkeypatch):
+    monkeypatch.setattr("transmute.enrich._probe_claude", lambda: "missing")
+    monkeypatch.setattr("transmute.enrich._probe_codex", lambda: "missing")
+    app.enricher.backend = "none"
+    app.commands.cmd_enrich("off")
+    monkeypatch.setattr("transmute.enrich._probe_codex", lambda: "signed_in")
+
+    assert app.enricher.refresh_subscription() is None
+    app.commands.cmd_enrich("on")
+    assert app.enricher.refresh_subscription() == "codex"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 def test_existing_custom_prompt_history_parent_permissions_are_unchanged(
     tmp_path,

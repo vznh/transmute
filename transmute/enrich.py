@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -126,6 +127,76 @@ signal and re-verify against it: {hint}"""
 
 TrackKind = Literal["original", "reupload", "derivative"]
 Confidence = Literal["high", "medium", "low"]
+CliState = Literal["signed_in", "signed_out", "missing", "unknown"]
+
+
+def _claude_env() -> dict[str, str]:
+    return {
+        key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")
+    }
+
+
+def _codex_env() -> dict[str, str]:
+    keep_codex = {"CODEX_HOME", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"}
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("CODEX_") or key in keep_codex
+    }
+
+
+def _probe_claude() -> CliState:
+    if not shutil.which("claude"):
+        return "missing"
+    try:
+        proc = subprocess.run(
+            ["claude", "auth", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=tempfile.gettempdir(),
+            env=_claude_env(),
+            check=False,
+        )
+    except FileNotFoundError:
+        return "missing"
+    except (subprocess.TimeoutExpired, OSError):
+        return "unknown"
+    try:
+        logged_in = json.loads(proc.stdout).get("loggedIn")
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return "unknown"
+    return (
+        ("signed_in" if logged_in else "signed_out")
+        if isinstance(logged_in, bool)
+        else "unknown"
+    )
+
+
+def _probe_codex() -> CliState:
+    if not shutil.which("codex"):
+        return "missing"
+    try:
+        proc = subprocess.run(
+            ["codex", "login", "status"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=tempfile.gettempdir(),
+            env=_codex_env(),
+            check=False,
+        )
+    except FileNotFoundError:
+        return "missing"
+    except (subprocess.TimeoutExpired, OSError):
+        return "unknown"
+    if proc.returncode == 0:
+        return "signed_in"
+    return (
+        "signed_out"
+        if "not logged in" in f"{proc.stdout} {proc.stderr}".lower()
+        else "unknown"
+    )
 
 
 @dataclass
@@ -157,6 +228,8 @@ class Enricher:
         self._api_key: str | None = None
         self._api_provider: str | None = None
         self._api_key_source: str | None = None
+        self._explicitly_disabled = False
+        self.cli_states: dict[str, CliState] = {"claude": "missing", "codex": "missing"}
         self._anthropic_client = None
         self._openai_client = None
         self._select_default_backend()
@@ -174,13 +247,60 @@ class Enricher:
                 "anthropic_api",
                 source="environment",
             )
-        elif shutil.which("claude"):
-            self.backend = "claude"
-        elif shutil.which("codex"):
-            self.backend = "codex"
         else:
-            self.backend = "none"
-            self.enabled = False
+            self._select_subscription_backend()
+
+    def _select_subscription_backend(self) -> str:
+        selected, states = self._probe_subscription_backend()
+        self.cli_states = states
+        self.backend = selected
+        self.enabled = selected != "none"
+        return selected
+
+    @staticmethod
+    def _probe_subscription_backend() -> tuple[str, dict[str, CliState]]:
+        claude = _probe_claude()
+        states: dict[str, CliState] = {"claude": claude, "codex": "missing"}
+        if claude == "signed_in":
+            selected = "claude"
+        else:
+            states["codex"] = _probe_codex()
+            selected = next(
+                (name for name in ("claude", "codex") if states[name] == "signed_in"),
+                next(
+                    (name for name in ("claude", "codex") if states[name] == "unknown"),
+                    "none",
+                ),
+            )
+        return selected, states
+
+    def refresh_subscription(self) -> str | None:
+        """Select a newly signed-in CLI while no provider is available.
+
+        Runs the status probes outside the lock. Only a confirmed sign-in
+        switches the backend, so a transient probe failure keeps rechecking.
+        """
+        if not self.needs_subscription_recheck:
+            return None
+        selected, states = self._probe_subscription_backend()
+        with self._client_lock:
+            if not self.needs_subscription_recheck:
+                return None
+            self.cli_states = states
+            if states.get(selected) != "signed_in":
+                return None
+            self._backend = selected
+            self._enabled = True
+            return selected
+
+    @property
+    def needs_subscription_recheck(self) -> bool:
+        with self._client_lock:
+            return (
+                self._backend == "none"
+                and self._api_key is None
+                and not self._explicitly_disabled
+            )
 
     @property
     def backend_label(self) -> str:
@@ -225,9 +345,16 @@ class Enricher:
             return self._api_key_source
 
     def use_backend(self, backend: str) -> None:
-        self.backend = backend
-        self.enabled = True
-        self.last_error = None
+        with self._client_lock:
+            self._explicitly_disabled = False
+            self._backend = backend
+            self._enabled = True
+            self.last_error = None
+
+    def set_enrichment_enabled(self, enabled: bool) -> None:
+        with self._client_lock:
+            self._explicitly_disabled = not enabled
+            self._enabled = enabled
 
     @staticmethod
     def detect_api_provider(key: str) -> str:
@@ -349,16 +476,7 @@ class Enricher:
 
     def _ask_codex(self, prompt: str) -> str | None:
         """Run a read-only web lookup through Codex with ChatGPT subscription auth."""
-        import tempfile
-
-        # Reuse CODEX_HOME/auth when configured, but do not inherit markers that
-        # would attach this lookup to the parent Codex/Conductor agent session.
-        keep_codex = {"CODEX_HOME", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"}
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith("CODEX_") or key in keep_codex
-        }
+        env = _codex_env()
         try:
             with tempfile.TemporaryDirectory(prefix="transmute-codex-") as run_dir:
                 schema_path = Path(run_dir) / "track-tags.schema.json"
@@ -436,12 +554,10 @@ class Enricher:
 
     def _ask_claude(self, prompt: str) -> str | None:
         """Run the lookup through headless Claude Code (`claude -p`) on the user's subscription."""
-        import tempfile
-
         # Isolate the run: a neutral cwd (so no project context is ingested) and no
         # inherited Claude Code session vars (so a run from inside another agent
         # doesn't nest into that session).
-        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+        env = _claude_env()
         try:
             proc = subprocess.run(
                 [
