@@ -35,6 +35,7 @@ _ERROR_PATTERNS: list[tuple[str, str, bool]] = [
     ("temporary failure in name resolution", "network error — DNS failed", True),
     ("getaddrinfo failed", "network error — DNS failed", True),
     ("connection", "network error — connection failed", True),
+    ("http error 403", "download refused (HTTP 403) — update transmute if it persists", True),
     ("http error 5", "server error — try again later", True),
     ("unable to download", "network error — download failed", True),
 ]

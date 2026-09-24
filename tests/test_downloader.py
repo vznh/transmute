@@ -134,6 +134,17 @@ def test_classify_network_retryable():
     assert retryable
 
 
+def test_http_403_is_not_reported_as_network_error():
+    summary, detail, retryable = classify_error(
+        Exception("ERROR: unable to download video data: HTTP Error 403: Forbidden"),
+        "https://www.youtube.com/watch?v=x",
+    )
+    assert summary == "download refused (HTTP 403) — update transmute if it persists"
+    assert "network" not in summary
+    assert retryable
+    assert "HTTP Error 403" in detail
+
+
 def test_classify_unknown_keeps_first_line_and_retries():
     e = Exception("ERROR: something odd happened\nmore detail here")
     summary, detail, retryable = classify_error(e, "https://a.com/1")
