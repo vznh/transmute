@@ -68,19 +68,19 @@ do not work. Once it is released, the version must be pinned, because Transmute
 is an alpha and both resolvers skip prereleases unless asked by name:
 
 ```sh
-uv tool install "transmute-cli==0.2a0"   # or: pipx install "transmute-cli==0.2a0"
-brew install ffmpeg                      # not included on this path
+uv tool install "transmute-cli==0.2.1a0"   # or: pipx install "transmute-cli==0.2.1a0"
+brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 0.2a
+transmute --version   # transmute 0.2.1a
 ```
 
-`brew list --versions transmute` reports `0.2` for the same build. Homebrew
+`brew list --versions transmute` reports `0.2.1` for the same build. Homebrew
 parses the version out of the release tag and drops the alpha suffix; PyPI will
-normalise it the other way, to `0.2a0`. All three name one release.
+normalise it the other way, to `0.2.1a0`. All three name one release.
 
 ## Requirements
 
