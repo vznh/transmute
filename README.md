@@ -136,6 +136,8 @@ canonical metadata — artist, title, album, release year, genre. Tags are writt
 the MP3 (cover art is preserved) and the file is renamed to
 `Artist - Title.mp3`. If a file with that name already exists, Transmute keeps it
 and adds a numeric suffix (`Artist - Title (1).mp3`) rather than overwriting it.
+Both CLI and API enrichment pin OpenAI/Codex to `gpt-6-luna` and Anthropic/Claude
+to `claude-haiku-5-5`.
 
 Auth (in order of preference):
 

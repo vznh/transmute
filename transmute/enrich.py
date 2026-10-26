@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-ANTHROPIC_MODEL = "claude-opus-4-8"
-OPENAI_MODEL = "gpt-5.6-terra"
+ANTHROPIC_MODEL = "claude-haiku-5-5"
+OPENAI_MODEL = "gpt-6-luna"
 MAX_SEARCHES = 4
 MAX_CONTINUATIONS = 3
 BACKEND_LABELS = {
@@ -490,6 +490,8 @@ class Enricher:
                         "--disable",
                         "shell_tool",
                         "exec",
+                        "--model",
+                        OPENAI_MODEL,
                         "--ephemeral",
                         "--ignore-user-config",
                         "--ignore-rules",
@@ -568,6 +570,8 @@ class Enricher:
                     "--allowedTools",
                     "WebSearch",
                     "WebFetch",
+                    "--model",
+                    ANTHROPIC_MODEL,
                 ],
                 input=prompt,
                 capture_output=True,

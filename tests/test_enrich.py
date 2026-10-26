@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from transmute.enrich import (
+    ANTHROPIC_MODEL,
     OPENAI_MODEL,
     OUTPUT_SCHEMA,
     Enricher,
@@ -329,7 +330,7 @@ def test_openai_api_uses_web_search_and_strict_schema(monkeypatch):
 
     assert tags.artist == "Artist"
     kwargs = create.call_args.kwargs
-    assert kwargs["model"] == OPENAI_MODEL
+    assert kwargs["model"] == "gpt-6-luna" == OPENAI_MODEL
     assert kwargs["tools"] == [{"type": "web_search"}]
     assert kwargs["text"]["format"] == {
         "type": "json_schema",
@@ -368,6 +369,7 @@ def test_codex_lookup_is_isolated_and_schema_constrained(run, monkeypatch):
             "shell_tool",
             "exec",
         ]
+        assert args[args.index("--model") + 1] == "gpt-6-luna"
         assert "--ephemeral" in args
         assert "--ignore-user-config" in args
         assert "--ignore-rules" in args
@@ -460,6 +462,35 @@ def test_claude_error_surfaces_structured_result(run):
         "You've hit your session limit · resets 3:50am (America/New_York)"
     )
     assert enricher.enabled
+
+
+def test_claude_cli_pins_model_and_preserves_isolation(monkeypatch):
+    import tempfile
+
+    monkeypatch.setenv("CLAUDECODE", "parent-session")
+    run = Mock(
+        return_value=CompletedProcess(
+            args=["claude"],
+            returncode=0,
+            stdout=json.dumps({"result": "{}", "is_error": False}),
+            stderr="",
+        )
+    )
+    monkeypatch.setattr("transmute.enrich.subprocess.run", run)
+    enricher = Enricher()
+    enricher.use_backend("claude")
+
+    assert enricher._ask_claude("prompt") == "{}"
+    args = run.call_args.args[0]
+    kwargs = run.call_args.kwargs
+    assert args[args.index("--model") + 1] == "claude-haiku-5-5" == ANTHROPIC_MODEL
+    assert args[args.index("--allowedTools") + 1 : args.index("--model")] == [
+        "WebSearch",
+        "WebFetch",
+    ]
+    assert kwargs["cwd"] == tempfile.gettempdir()
+    assert kwargs["timeout"] == 300 and kwargs["check"] is False
+    assert "CLAUDECODE" not in kwargs["env"]
 
 
 @patch("transmute.enrich.subprocess.run")
@@ -647,3 +678,7 @@ def test_anthropic_continuation_limit_is_bounded(monkeypatch):
     assert enricher._ask_anthropic_api("prompt") is None
     assert "continuation limit" in enricher.last_error
     assert create.call_count == 4
+    assert all(
+        call.kwargs["model"] == "claude-haiku-5-5" == ANTHROPIC_MODEL
+        for call in create.call_args_list
+    )
