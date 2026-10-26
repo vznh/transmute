@@ -69,9 +69,9 @@ class ScrollableHelpControl(FormattedTextControl):
     """Formatted help content that forwards wheel scrolling to its owner."""
 
     def __init__(
-        self, text: AnyFormattedText, on_scroll: Callable[[int], None]
+        self, text: AnyFormattedText, on_scroll: Callable[[int], None], *, focusable: bool = False
     ) -> None:
-        super().__init__(text)
+        super().__init__(text, focusable=focusable)
         self.on_scroll = on_scroll
 
     def mouse_handler(

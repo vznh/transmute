@@ -16,7 +16,7 @@ def build_key_bindings(app) -> KeyBindings:
     kb = KeyBindings()
     # Main input actions remain live while help and the folder editor are shown.
     no_overlay = Condition(
-        lambda: app.modal is None and app.dir_picker is None and not app.help_open
+        lambda: app.modal is None and app.dir_picker is None and not app.help_open and not app.sync_open
     )
     has_actionable = Condition(lambda: bool(app._actionable())) & no_overlay
     has_selection = Condition(app.has_selection)
@@ -28,10 +28,34 @@ def build_key_bindings(app) -> KeyBindings:
         lambda: app.dir_picker is not None and app.dir_picker.stage == "confirm"
     )
     dir_focused = has_focus(app.dir_buffer)
+    sync_focused = Condition(
+        lambda: app.sync_open
+        and app.app.layout.current_control is app.sync_control
+    )
 
     @kb.add("up", filter=has_actionable)
     def _(event):
         app._move_sel(-1)
+
+    @kb.add("up", filter=sync_focused)
+    def _(event):
+        app.sync_move(-1)
+
+    @kb.add("down", filter=sync_focused)
+    def _(event):
+        app.sync_move(1)
+
+    @kb.add("enter", filter=sync_focused, eager=True)
+    def _(event):
+        app.sync_toggle()
+
+    @kb.add("a", filter=sync_focused, eager=True)
+    def _(event):
+        app.sync_select(True)
+
+    @kb.add("A", filter=sync_focused, eager=True)
+    def _(event):
+        app.sync_select(False)
 
     @kb.add("down", filter=has_actionable & has_selection)
     def _(event):
@@ -47,6 +71,9 @@ def build_key_bindings(app) -> KeyBindings:
 
     @kb.add("escape", eager=True)
     def _(event):
+        if app.sync_open:
+            app.sync_back()
+            return
         if app.dir_picker is not None:
             app.close_dir_picker()
             return
@@ -67,6 +94,9 @@ def build_key_bindings(app) -> KeyBindings:
         now = time.monotonic()
         if app.dir_picker is not None:
             app.close_dir_picker()
+            return
+        if app.sync_open:
+            app.sync_back()
             return
         if app.help_open:
             app.close_help()
@@ -110,5 +140,13 @@ def build_key_bindings(app) -> KeyBindings:
     @kb.add("s-tab", filter=Condition(lambda: app.dir_picker is not None))
     def _(event):
         app.toggle_dir_focus()
+
+    @kb.add("tab", filter=Condition(lambda: app.sync_open) & ~has_completions)
+    def _(event):
+        app.toggle_sync_focus()
+
+    @kb.add("s-tab", filter=Condition(lambda: app.sync_open))
+    def _(event):
+        app.toggle_sync_focus()
 
     return kb

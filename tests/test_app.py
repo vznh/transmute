@@ -754,7 +754,9 @@ def test_help_and_both_inputs_fit_small_terminals(app, rows, columns):
         with create_pipe_input() as pipe:
             pipe.send_text("\x04")
             app.app.input = pipe
-            app.app.output = SizedDummyOutput()
+            output = SizedDummyOutput()
+            app.app.output = output
+            app.app.renderer.output = output
             await app.app.run_async()
 
     asyncio.run(render_once())
@@ -838,6 +840,297 @@ def test_help_mouse_wheel_scrolls_text_and_padding_without_changing_drafts(app):
 def test_unknown_command_reports_error(app):
     app.commands.dispatch("/nope")
     assert any("unknown command" in line for _, line in app.messages)
+
+
+def _sync_item(item_id, direction="to_phone", confidence="high", name=None):
+    track = SimpleNamespace(relative_path=name or f"Artist/{item_id}.mp3")
+    return SimpleNamespace(
+        id=item_id,
+        direction=direction,
+        confidence=confidence,
+        reason="close title match" if confidence == "low" else "",
+        track=track,
+        target_name=f"{item_id}.mp3",
+    )
+
+
+def _sync_plan(*items):
+    return SimpleNamespace(device_name="Test iPhone", out_dir=Path("/music"), items=items)
+
+
+def test_sync_preview_is_read_only_until_continue_and_matched_rows_are_dim(app):
+    from transmute.sync import SyncResult
+
+    class Service:
+        def __init__(self):
+            self.transfers = []
+
+        def preview(self, out_dir, **kwargs):
+            return _sync_plan(
+                _sync_item("same", "matched"), _sync_item("new"),
+                _sync_item("maybe", confidence="low"),
+            )
+
+        def transfer(self, plan, selected_ids, **kwargs):
+            self.transfers.append(selected_ids)
+            return (SyncResult("new", "done"), SyncResult("maybe", "done"))
+
+    service = Service()
+    app.sync_service = service
+    app.start_sync_preview()
+    assert app.pool.calls[-1][0] == "_sync_preview_worker"
+    _, args = app.pool.calls.pop()
+    app._sync_preview_worker(*args)
+
+    assert app.sync_selected == set()
+    assert service.transfers == []
+    fragments = app._render_sync()
+    text = "".join(value for _, value in fragments)
+    assert "Already synced" in text and "? Possible duplicate/conflict" in text
+    assert any(style == "class:dim" and "Already synced" in value for style, value in fragments)
+
+    app.sync_select(False)
+    app.sync_cursor = 3
+    app.sync_toggle()
+    assert service.transfers == []
+    worker, args = app.pool.calls.pop()
+    assert worker == "_sync_transfer_worker"
+    app._sync_transfer_worker(*args)
+    assert service.transfers == [{"new", "maybe"}]
+    assert app.sync_selected == set()
+
+
+def test_sync_high_and_all_selection_and_focus_preserve_input_draft(app):
+    app.sync_plan = _sync_plan(
+        _sync_item("high"), _sync_item("low", confidence="low"),
+        _sync_item("matched", "matched"),
+    )
+    app.input_buffer.text = "https://youtu.be/draft"
+    app.sync_open = True
+    app.sync_focus = True
+    app.app.layout.focus(app.sync_control)
+    app.sync_select(True)
+    assert app.sync_selected == {"high"}
+    app.sync_select(False)
+    assert app.sync_selected == {"high", "low"}
+    app.toggle_sync_focus()
+    assert app.app.layout.current_buffer is app.input_buffer
+    assert app.input_buffer.text == "https://youtu.be/draft"
+
+
+def test_sync_cancel_waits_for_worker_and_retry_keeps_successes(app):
+    from transmute.sync import SyncResult
+
+    app.sync_plan = _sync_plan(_sync_item("done"), _sync_item("failed"))
+    app.sync_results = {
+        "done": SyncResult("done", "done"),
+        "failed": SyncResult("failed", "error", "phone disconnected"),
+    }
+    app.retry_sync()
+    assert app.sync_selected == {"failed"}
+    assert app.sync_open and app.sync_focus
+    app.sync_busy = True
+    app.sync_transfer_active = True
+    app.sync_back()
+    assert app.sync_open and app.sync_cancel_requested
+    assert "stops after this file" in "".join(text for _, text in app._render_sync())
+
+
+def test_sync_command_music_is_truthful_and_help_documents_shortcuts(app):
+    app.commands.cmd_sync("music")
+    note = app.messages[-1][1]
+    assert "Finder" in note and "unsupported" in note
+    app.commands.cmd_help("")
+    body = "".join(text for _, text in app._render_help())
+    assert "/sync" in body and "a/A" in body
+
+
+def test_sync_shortcuts_are_scoped_to_report_focus(app):
+    app.sync_open = True
+    app.sync_focus = False
+    app.app.layout.focus(app.input_buffer)
+    select_binding = app.app.key_bindings.get_bindings_for_keys(("a",))[-1]
+    select_all_binding = app.app.key_bindings.get_bindings_for_keys(("A",))[-1]
+    enter_bindings = app.app.key_bindings.get_bindings_for_keys((Keys.Enter,))
+    with set_app(app.app):
+        assert not select_binding.filter()
+        assert not select_all_binding.filter()
+        assert not any(binding.filter() for binding in enter_bindings)
+    app.sync_focus = True
+    app.app.layout.focus(app.sync_control)
+    with set_app(app.app):
+        assert select_binding.filter()
+        assert select_all_binding.filter()
+        assert any(binding.filter() for binding in enter_bindings)
+
+
+@pytest.mark.parametrize("rows, columns", [(24, 40), (24, 80), (35, 100)])
+def test_sync_report_renders_at_small_terminal_sizes(app, rows, columns):
+    app.sync_plan = _sync_plan(_sync_item("one"), _sync_item("two", confidence="low"))
+    app.sync_open = True
+    app.sync_focus = True
+    app.app.layout.focus(app.sync_control)
+    screens = []
+    app.app.after_render += lambda _app: screens.append(_app.renderer._last_screen)
+
+    async def render_once():
+        class SizedDummyOutput(DummyOutput):
+            def get_size(self):
+                return Size(rows=rows, columns=columns)
+
+        with create_pipe_input() as pipe:
+            pipe.send_text("\x04")
+            app.app.input = pipe
+            output = SizedDummyOutput()
+            app.app.output = output
+            app.app.renderer.output = output
+            await app.app.run_async()
+
+    asyncio.run(render_once())
+    rendered = "\n".join(
+        "".join(cell.char for _, cell in sorted(row.items())).rstrip()
+        for _, row in sorted(screens[0].data_buffer.items())
+    )
+    assert "Spotify sync preview" in rendered
+    assert "Continue" in rendered
+    assert "two.mp3" in rendered
+
+
+def test_sync_excludes_only_queued_and_active_paths(app, tmp_path):
+    completed = Job(url="done", status="done", path=tmp_path / "done.mp3")
+    failed = Job(url="failed", status="error", path=tmp_path / "failed.mp3")
+    queued = Job(url="queued", path=tmp_path / "queued.mp3")
+    active_path = tmp_path / "active.mp3"
+    app.completed.append(completed)
+    app.failed.append(failed)
+    app._queued_jobs.append(queued)
+    app._active_paths[1] = active_path
+
+    assert set(app._sync_excluded_paths()) == {queued.path, active_path}
+
+
+def test_sync_preview_filesystem_error_ends_busy_state(app):
+    class Service:
+        def preview(self, *_args, **_kwargs):
+            raise OSError("folder disappeared")
+
+    app.sync_service = Service()
+    app.start_sync_preview()
+    _, args = app.pool.calls.pop()
+    app._sync_preview_worker(*args)
+
+    assert not app.sync_busy
+    text = "".join(value for _, value in app._render_sync())
+    assert "Sync unavailable" in text
+    assert "Scanning output folder" not in text
+
+
+def test_sync_error_reason_is_visible_and_retry_notice_does_not_deadlock(app):
+    from transmute.sync import SyncResult
+
+    app.sync_plan = _sync_plan(_sync_item("bad"))
+    app.sync_results["bad"] = SyncResult("bad", "error", "phone storage full")
+    rendered = "".join(value for _, value in app._render_sync())
+    assert "phone storage full" in rendered
+
+    app.sync_plan = None
+    app.retry_sync()
+    assert "no Spotify sync preview" in app.messages[-1][1]
+
+
+def test_pipe_input_keeps_draft_and_scopes_select_all_to_sync_report(app):
+    app.sync_plan = _sync_plan(_sync_item("one"), _sync_item("maybe", confidence="low"))
+    app.sync_open = True
+    app.input_buffer.text = "draft"
+
+    async def run_keys():
+        with create_pipe_input() as pipe:
+            pipe.send_text("a\taA\r\x04")
+            app.app.input = pipe
+            app.app.output = DummyOutput()
+            await app.app.run_async()
+
+    asyncio.run(run_keys())
+
+    assert app.sync_selected == {"maybe"}
+    assert app.input_buffer.text == "adraft"
+    assert not app.sync_busy
+
+
+def test_sync_scroll_keeps_continue_visible_after_navigating_long_report(app):
+    app.sync_plan = _sync_plan(*(_sync_item(f"track-{index}") for index in range(50)))
+    app.sync_open = True
+    app.sync_focus = True
+    app.sync_selected = {item.id for item in app.sync_plan.items}
+    app.app.layout.focus(app.sync_control)
+
+    async def navigate():
+        class SizedDummyOutput(DummyOutput):
+            def get_size(self):
+                return Size(rows=24, columns=80)
+
+        with create_pipe_input() as pipe:
+            pipe.send_text("\x1b[B" * 50 + "\x04")
+            app.app.input = pipe
+            output = SizedDummyOutput()
+            app.app.output = output
+            app.app.renderer.output = output
+            await app.app.run_async()
+
+    asyncio.run(navigate())
+    assert app.sync_cursor == 50
+    assert app.sync_pane.vertical_scroll > 0
+    app.app.renderer.render(app.app, app.app.layout)
+    screen = app.app.renderer._last_screen
+    rendered = "\n".join(
+        "".join(cell.char for _, cell in sorted(row.items())).rstrip()
+        for _, row in sorted(screen.data_buffer.items())
+    )
+    assert len(screen.data_buffer) <= 24
+    assert "track-49.mp3" in rendered
+    assert "Continue" in rendered
+
+
+def test_help_and_directory_picker_replace_sync_panel_without_losing_draft(app):
+    app.input_buffer.text = "saved URL draft"
+    app.sync_open = True
+    app.sync_focus = True
+
+    app.open_help()
+    assert app.help_open and not app.sync_open
+    assert app.input_buffer.text == "saved URL draft"
+
+    app.close_help()
+    app.sync_open = True
+    app.open_dir_picker()
+    assert app.dir_picker is not None and not app.sync_open
+    assert app.input_buffer.text == "saved URL draft"
+
+
+def test_sync_preview_replaces_help_and_directory_picker_without_losing_draft(app):
+    from transmute.sync import SyncResult
+
+    app.input_buffer.text = "saved URL draft"
+    app.open_help()
+    app.commands.cmd_sync("")
+    assert app.sync_open and not app.help_open and app.dir_picker is None
+    assert app.input_buffer.text == "saved URL draft"
+
+    app.sync_busy = False
+    app.sync_plan = _sync_plan(_sync_item("retry"))
+    app.sync_results = {"retry": SyncResult("retry", "error", "try again")}
+    app.open_help()
+    app.retry_sync()
+    assert app.sync_open and not app.help_open and app.dir_picker is None
+    assert app.input_buffer.text == "saved URL draft"
+
+    app.sync_busy = False
+    app.sync_open = False
+    app.commands.cmd_out("")
+    assert app.dir_picker is not None
+    app.commands.cmd_sync("")
+    assert app.sync_open and not app.help_open and app.dir_picker is None
+    assert app.input_buffer.text == "saved URL draft"
 
 
 def test_enrich_selects_provider_and_toggles(app):

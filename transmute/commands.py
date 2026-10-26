@@ -18,6 +18,7 @@ HELP_ROWS = [
     ("/key [clear]", "securely set or clear one API key"),
     ("/list", "show recent converted and failed tracks across sessions"),
     ("/retry", "requeue all retryable failed downloads"),
+    ("/sync [spotify|music|retry]", "preview Spotify sync; a/A select tracks, Enter continues"),
     ("/login [codex|claude]", "log in to a subscription provider"),
     ("/logout [codex|claude]", "log out of a subscription provider"),
     ("/clear", "clear history and messages"),
@@ -45,6 +46,16 @@ class Commands:
 
     def cmd_help(self, _arg: str) -> None:
         self.app.open_help()
+
+    def cmd_sync(self, arg: str) -> None:
+        if arg == "music":
+            self.app.msg("class:dim", "Import the output folder into macOS Music, then use Finder > iPhone > Music to sync. iPhone Music export is unsupported.")
+        elif arg == "retry":
+            self.app.retry_sync()
+        elif arg in ("", "spotify"):
+            self.app.start_sync_preview()
+        else:
+            self.app.msg("class:err", "sync must be spotify, music, or retry")
 
     def _set_out_dir(self, text: str) -> None:
         path = Path(text).expanduser()

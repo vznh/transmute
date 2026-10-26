@@ -16,7 +16,7 @@ from collections import deque
 from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -44,6 +44,9 @@ from .style import HELP_HINT, HISTORY_SHOWN, MESSAGES_SHOWN, PLACEHOLDER, STYLE,
 from .widgets import Modal
 
 EntryKind = Literal["info", "ok", "err", "hint"]
+
+if TYPE_CHECKING:
+    from .sync import SyncPlan, SyncProgress, SyncResult, SyncService
 
 
 @dataclass
@@ -77,6 +80,7 @@ class App:
         pool: Executor | None = None,
         activity_store: ActivityStore | None = None,
         settings_store: SettingsStore | None = None,
+        sync_service: SyncService | None = None,
     ) -> None:
         self.enricher = Enricher()
         self.completed: list[Job] = []
@@ -84,6 +88,18 @@ class App:
         self.history: list[Entry] = []
         self.messages: deque[tuple[str, str]] = deque(maxlen=MESSAGES_SHOWN)
         self.pool = pool or ThreadPoolExecutor(max_workers=MAX_WORKERS)
+        self.sync_service = sync_service
+        self.sync_plan: SyncPlan | None = None
+        self.sync_results: dict[str, SyncResult] = {}
+        self.sync_selected: set[str] = set()
+        self.sync_cursor = 0
+        self.sync_status = ""
+        self.sync_open = False
+        self.sync_focus = False
+        self.sync_busy = False
+        self.sync_transfer_active = False
+        self.sync_cancel_requested = False
+        self.sync_pane = None
         self.lock = threading.Lock()
         self.activity_lock = threading.RLock()
         self.activity_store: ActivityStore | None = activity_store
@@ -95,6 +111,8 @@ class App:
         )
         self.settings = self._load_settings()
         self.active: dict[int, str] = {}
+        self._active_paths: dict[int, Path | None] = {}
+        self._queued_jobs: list[Job] = []
         self.queued = 0
         self.sel: int | None = None
         self.modal: Modal | None = None
@@ -113,7 +131,7 @@ class App:
             key_bindings=build_key_bindings(self),
             style=STYLE,
             full_screen=True,
-            mouse_support=Condition(lambda: self.help_open),
+            mouse_support=Condition(lambda: self.help_open or self.sync_open),
         )
 
     @staticmethod
@@ -262,6 +280,288 @@ class App:
             out.extend((style, f"    {line[:72]}\n") for style, line in msgs[-4:])
         return out
 
+    def _render_sync(self) -> list[tuple[str, str]]:
+        """Format a locked snapshot of the read-only plan and transfer results."""
+        with self.lock:
+            plan = self.sync_plan
+            results = dict(self.sync_results)
+            selected = set(self.sync_selected)
+            cursor = self.sync_cursor
+            status = self.sync_status
+            busy = self.sync_busy
+            copying = self.sync_transfer_active
+        out = [("class:subsection", "  Spotify sync preview\n")]
+        if status:
+            out.append(("class:accent", f"  {status[:100]}\n"))
+        if plan is None:
+            message = (
+                "Scanning output folder and Spotify…"
+                if busy
+                else "No preview available. Reconnect the iPhone and run /sync."
+            )
+            out.append(("class:dim", f"  {message}\n"))
+            return out
+        out.append(("class:dim", f"  {plan.device_name} · {plan.out_dir}\n"))
+        items = list(plan.items)
+        for index, item in enumerate(items):
+            result = results.get(item.id)
+            selected_mark = "[x]" if item.id in selected else "[ ]"
+            if item.direction == "matched":
+                label, style = "Already synced", "class:dim"
+            elif item.confidence == "low":
+                direction = "To iPhone" if item.direction == "to_phone" else "To computer"
+                label, style = f"{direction} ?", "class:dim"
+            else:
+                label = "To iPhone" if item.direction == "to_phone" else "To computer"
+                style = "class:dim" if result and result.status == "done" else "class:accent"
+            if result:
+                result_label = {"done": "Copied", "error": "Failed", "cancelled": "Cancelled"}.get(result.status, label)
+                if item.confidence == "low":
+                    label = f"{result_label} {direction} ?"
+                    style = "class:dim"
+                elif item.direction == "matched":
+                    style = "class:dim"
+                else:
+                    label = f"{result_label} {label}"
+                    style = "class:ok" if result.status == "done" else "class:err"
+            marker = "❯" if index == cursor else " "
+            name = item.track.relative_path.rsplit("/", 1)[-1]
+            out.append((style, f"{marker} {selected_mark} {label}: {name[:60]}\n"))
+            details = []
+            if item.confidence == "low":
+                details.append("? Possible duplicate/conflict")
+            if item.reason:
+                details.append(item.reason[:56])
+            if result and result.status != "done":
+                details.append(f"{result.status}: {result.message[:80]}")
+            if details:
+                detail_style = "class:dim" if item.confidence == "low" else "class:err"
+                out.append((detail_style, f"    {' · '.join(details)}\n"))
+        continue_index = len(items)
+        marker = "❯" if cursor == continue_index else " "
+        enabled = bool(selected) and not busy
+        suffix = " (sync running)" if busy else ("" if enabled else " (select tracks first)")
+        out.append(("class:accent" if enabled else "class:dim", f"{marker} Continue{suffix}\n"))
+        escape_hint = "Esc stops after this file" if copying else "Esc closes"
+        out.append(("class:dim", f"  ↑/↓ move · Enter select/continue · a high confidence · A all · Tab input · {escape_hint}\n"))
+        return out
+
+    def _sync_excluded_paths(self) -> tuple[Path, ...]:
+        with self.lock:
+            paths = [path for path in self._active_paths.values() if path is not None]
+            paths.extend(job.path for job in self._queued_jobs if job.path is not None)
+            return tuple(set(paths))
+
+    def start_sync_preview(self) -> None:
+        with self.lock:
+            self.help_open = False
+            self.dir_picker = None
+            if self.sync_busy:
+                self.sync_open = True
+                self.sync_focus = True
+                reopen = True
+            else:
+                reopen = False
+                self.sync_open = True
+                self.sync_busy = True
+                self.sync_plan = None
+                self.sync_results = {}
+                self.sync_selected = set()
+                self.sync_status = "Scanning (read only)…"
+                self.sync_focus = True
+                self.sync_pane.vertical_scroll = 0
+        self.app.layout.focus(self.sync_control)
+        if reopen:
+            self.refresh()
+            return
+        try:
+            self.pool.submit(self._sync_preview_worker, self.settings_snapshot().out_dir, self._sync_excluded_paths())
+        except Exception as error:  # noqa: BLE001 - normalize worker submission failures.
+            self._publish_sync_error(error)
+        self.refresh()
+
+    def _get_sync_service(self) -> SyncService:
+        if self.sync_service is None:
+            from .sync import SyncService
+
+            self.sync_service = SyncService()
+        return self.sync_service
+
+    def _sync_preview_worker(self, out_dir: Path, excluded: tuple[Path, ...]) -> None:
+        try:
+            plan = self._get_sync_service().preview(out_dir, excluded_paths=excluded, progress=self._sync_progress)
+        except Exception as error:  # noqa: BLE001 - terminate sync UI state for filesystem and USB failures.
+            self._publish_sync_error(error)
+            return
+        with self.lock:
+            self.sync_plan = plan
+            self.sync_busy = False
+            self.sync_status = f"Preview ready · {len(plan.items)} tracks · no files changed"
+            self.sync_cursor = 0
+        self.refresh()
+
+    def _sync_progress(self, progress: SyncProgress) -> None:
+        filename = getattr(progress, "filename", "")
+        phase = getattr(progress, "phase", "Working")
+        with self.lock:
+            self.sync_status = f"{phase} {filename}".strip()[:120]
+        self.refresh()
+
+    def _publish_sync_error(self, error: Exception) -> None:
+        with self.lock:
+            self.sync_busy = False
+            self.sync_transfer_active = False
+            self.sync_status = f"Sync unavailable: {self._error_line(error)}"
+        self.refresh()
+
+    def sync_move(self, delta: int) -> None:
+        with self.lock:
+            count = len(self.sync_plan.items) if self.sync_plan else 0
+            self.sync_cursor = min(max(self.sync_cursor + delta, 0), count)
+        self._scroll_sync_to_cursor()
+        self.refresh()
+
+    def _scroll_sync_to_cursor(self) -> None:
+        if self.sync_pane is None:
+            return
+        with self.lock:
+            plan = self.sync_plan
+            cursor = self.sync_cursor
+            results = dict(self.sync_results)
+        preceding_rows = 0
+        if plan is not None:
+            preceding_rows = sum(
+                1 + bool(
+                    item.confidence == "low"
+                    or item.reason
+                    or results.get(item.id) is not None
+                    and results[item.id].status != "done"
+                )
+                for item in plan.items[:cursor]
+            )
+        size = self.app.output.get_size()
+        content_height = self.sync_pane.content.preferred_height(max(size.columns - 1, 1), self.sync_pane.max_available_height).preferred
+        viewport = max(size.rows - 9, 1)
+        self.sync_pane.vertical_scroll = min(max(preceding_rows - viewport + 2, 0), max(content_height - viewport, 0))
+
+    def sync_scroll(self, delta: int) -> None:
+        if self.sync_pane is None:
+            return
+        self.sync_pane.vertical_scroll = max(self.sync_pane.vertical_scroll + delta, 0)
+        self.refresh()
+
+    def sync_toggle(self) -> None:
+        with self.lock:
+            if not self.sync_plan or self.sync_cursor >= len(self.sync_plan.items):
+                start = bool(self.sync_selected) and not self.sync_busy
+            else:
+                item = self.sync_plan.items[self.sync_cursor]
+                if item.direction == "matched" or self.sync_results.get(item.id, None) and self.sync_results[item.id].status == "done":
+                    return
+                if item.id in self.sync_selected:
+                    self.sync_selected.remove(item.id)
+                else:
+                    self.sync_selected.add(item.id)
+                start = False
+        if start:
+            self.start_sync_transfer()
+        self.refresh()
+
+    def sync_select(self, high_only: bool) -> None:
+        with self.lock:
+            if not self.sync_plan:
+                return
+            self.sync_selected = {
+                item.id for item in self.sync_plan.items
+                if item.direction != "matched"
+                and (not high_only or item.confidence == "high")
+                and not (self.sync_results.get(item.id) and self.sync_results[item.id].status == "done")
+            }
+        self.refresh()
+
+    def start_sync_transfer(self) -> None:
+        with self.lock:
+            if self.sync_busy or self.sync_plan is None or not self.sync_selected:
+                return
+            selected = set(self.sync_selected)
+            plan = self.sync_plan
+            self.sync_busy = True
+            self.sync_transfer_active = True
+            self.sync_cancel_requested = False
+            self.sync_status = "Copying selected tracks…"
+        try:
+            self.pool.submit(self._sync_transfer_worker, plan, selected)
+        except RuntimeError as error:
+            self._publish_sync_error(error)
+        self.refresh()
+
+    def _sync_transfer_worker(self, plan: SyncPlan, selected: set[str]) -> None:
+        try:
+            results = self._get_sync_service().transfer(
+                plan, selected, progress=self._sync_progress, cancelled=self._sync_cancelled
+            )
+        except Exception as error:  # noqa: BLE001 - normalize provider and filesystem failures.
+            self._publish_sync_error(error)
+            return
+        with self.lock:
+            self.sync_results.update({result.item_id: result for result in results})
+            self.sync_selected.difference_update(
+                result.item_id for result in results if result.status == "done"
+            )
+            self.sync_busy = False
+            self.sync_transfer_active = False
+            self.sync_status = "Transfer complete" if not self.sync_cancel_requested else "Stopped after current file"
+            self.sync_cancel_requested = False
+        self.refresh()
+
+    def _sync_cancelled(self) -> bool:
+        with self.lock:
+            return self.sync_cancel_requested
+
+    def sync_back(self) -> None:
+        closed = False
+        with self.lock:
+            if self.sync_busy and self.sync_transfer_active:
+                self.sync_cancel_requested = True
+                self.sync_status = "Stopping after current file…"
+            else:
+                self.sync_open = False
+                self.sync_focus = False
+                closed = True
+        if closed:
+            self.app.layout.focus(self.input_buffer)
+        self.refresh()
+
+    def toggle_sync_focus(self) -> None:
+        focus_report = not self.app.layout.has_focus(self.sync_control)
+        with self.lock:
+            self.sync_focus = focus_report
+        self.app.layout.focus(self.sync_control if focus_report else self.input_buffer)
+        self.refresh()
+
+    def retry_sync(self) -> None:
+        no_preview = False
+        with self.lock:
+            if not self.sync_plan:
+                no_preview = True
+            elif self.sync_busy:
+                return
+            else:
+                failed = {key for key, result in self.sync_results.items() if result.status in ("error", "cancelled")}
+                if not failed:
+                    return
+                self.help_open = False
+                self.dir_picker = None
+                self.sync_selected = failed
+                self.sync_cursor = 0
+                self.sync_open = True
+                self.sync_focus = True
+        if no_preview:
+            self.msg("class:dim", "no Spotify sync preview to retry")
+            return
+        self.app.layout.focus(self.sync_control)
+        self.refresh()
+
     def _build(self):
         """Body fragments, split where the inline hint input goes (below the
         selected low-confidence entry). Returns (above, below)."""
@@ -362,6 +662,13 @@ class App:
         return "type a folder under home — tab to complete, enter to set"
 
     def _input_hint(self):
+        if self.sync_open:
+            if self.app.layout.current_control is self.sync_control:
+                with self.lock:
+                    copying = self.sync_transfer_active
+                escape = "Esc stops after current file" if copying else "Esc closes"
+                return [("class:input.hint", f"  ↑/↓ browse · Enter select/continue · a high confidence · A all · Tab input · {escape}")]
+            return [("class:input.hint", "  type URLs or commands · Tab sync report · Esc closes when ready")]
         if self.dir_picker is not None:
             if self.dir_buffer_focused:
                 if self.dir_picker.stage == "confirm":
@@ -588,6 +895,8 @@ class App:
         with self.lock:
             self.dir_picker = DirPicker()
             self.sel = None
+            self.sync_open = False
+            self.sync_focus = False
         self.dir_buffer.reset()
         self.app.layout.focus(self.input_buffer)
         self._update_focus()
@@ -657,8 +966,11 @@ class App:
         self.refresh()
 
     def open_help(self) -> None:
-        self.help_open = True
-        self.sel = None
+        with self.lock:
+            self.help_open = True
+            self.sel = None
+            self.sync_open = False
+            self.sync_focus = False
         self.app.layout.focus(self.input_buffer)
         self._update_focus()
         self.refresh()
@@ -670,6 +982,8 @@ class App:
     def open_modal(self, modal: Modal) -> None:
         with self.lock:
             self.modal = modal
+            self.sync_open = False
+            self.sync_focus = False
         self.input_buffer.set_document(
             Document(modal.initial, len(modal.initial)), bypass_readonly=True
         )
@@ -725,9 +1039,10 @@ class App:
             job,
         )
 
-    def _set_active(self, seq: int, text: str) -> None:
+    def _set_active(self, seq: int, text: str, *, path: Path | None = None) -> None:
         with self.lock:
             self.active[seq] = text
+            self._active_paths[seq] = path
         self.refresh()
 
     def _note_done(self, job: Job, tags: TrackTags | None) -> None:
@@ -789,6 +1104,7 @@ class App:
             skipped = len(jobs) - len(claimed_jobs)
             with self.lock:
                 self.queued += len(claimed_jobs)
+                self._queued_jobs.extend(claimed_jobs)
                 for job in claimed_jobs:
                     self._run_outcomes[job.history_id] = "queued"
         if skipped:
@@ -832,24 +1148,30 @@ class App:
             self._seq += 1
             seq = self._seq
             self.queued -= 1
+            self._queued_jobs = [queued for queued in self._queued_jobs if queued is not job]
             self.active[seq] = f"starting  {job.url[:50]}"
+            self._active_paths[seq] = job.path
         self.refresh()
 
         def on_progress(j: Job, frac: float | None) -> None:
             name = (j.title or j.url)[:44]
             phase = "converting  " if frac is None else f"↓ {frac:>4.0%}  "
-            self._set_active(seq, phase + name)
+            self._set_active(seq, phase + name, path=j.path)
 
         try:
             download_job(job, settings, on_progress)
+            with self.lock:
+                self._active_paths[seq] = job.path
             if job.status != "done":
                 self._record_failed_outcome(job)
                 return
 
             tags = None
             if self.enricher.enabled:
-                self._set_active(seq, f"enriching  {(job.title or '')[:44]}")
+                self._set_active(seq, f"enriching  {(job.title or '')[:44]}", path=job.path)
                 tags = self._enrich(job)
+                with self.lock:
+                    self._active_paths[seq] = job.path
 
             self._record_successful_outcome(job, tags)
         except Exception as error:  # noqa: BLE001
@@ -864,6 +1186,7 @@ class App:
         finally:
             with self.lock:
                 self.active.pop(seq, None)
+                self._active_paths.pop(seq, None)
             self.refresh()
 
     def _enrich(

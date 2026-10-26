@@ -134,7 +134,9 @@ main
   └── App (state + orchestration)
         ├── prompt_toolkit adapters (layout, keys, commands, widgets, style)
         ├── downloader (yt-dlp/ffmpeg)
-        └── enrich (provider calls + normalized tags + ID3 writes)
+        ├── enrich (provider calls + normalized tags + ID3 writes)
+        └── sync (comparison plans + additive transfer)
+              └── iphone (USB Spotify Documents adapter)
 ```
 
 - **A1 — Keep `main.py` thin.** It owns process startup and delegates application
@@ -184,6 +186,16 @@ main
 - **A22 — Do not build a plugin platform preemptively.** Third-party discovery,
   package namespaces, and lifecycle hooks wait for an explicit extension use
   case.
+
+### Spotify sync boundary
+
+`sync.py` owns immutable comparison plans, progress/results, and additive MP3
+transfers. `App` owns the preview selection, cursor, cancellation request, and
+UI status; rendering snapshots that state and never scans files or accesses a
+phone. `iphone.py` is the USB-only adapter for Spotify's vended Documents
+directory. It imports `pymobiledevice3` only when sync is requested and does not
+run during ordinary application startup. Device access stays scoped to the
+trusted USB phone and Spotify Documents container.
 
 ### Browser prototype boundary
 
@@ -583,6 +595,11 @@ helper remains a separate operational and product decision under P1/P2.
   dependency.
 - **DEP18 — Check the licence of a new dependency.** Record its SPDX expression
   and confirm compatibility with `DEP17` before adding it.
+
+`pymobiledevice3` provides the USB lockdown, House Arrest, and AFC operations
+needed by the Spotify sync adapter. Its `GPL-3.0-or-later` licence is compatible
+with Transmute's `GPL-3.0-or-later` distribution licence; keep its import lazy so
+ordinary startup does not access USB services.
 
 ## 15. Change and review discipline
 

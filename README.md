@@ -163,6 +163,28 @@ Choose a provider with `/enrich codex|claude|api`, or toggle the selected provid
 with `/enrich on|off`. With no usable credentials, enrichment is skipped
 automatically.
 
+## Spotify iPhone sync
+
+Connect and unlock one iPhone over USB, trust the computer if prompted, and
+install Spotify on the phone. Run `/sync` (or `/sync spotify`) to scan every MP3
+in the current output folder and Spotify's app documents, then review the
+read-only preview. Exact matches are marked **Already synced**; possible
+duplicates and filename conflicts are dimmed and marked with `?` for review.
+Nothing transfers until you select tracks and move to **Continue**.
+
+In the preview, use Up/Down to browse, Enter to select a row, `a` to select
+high-confidence items, and `A` to select every transferable item. Enter on
+Continue starts the selected copies. Tab or Shift-Tab switches between the
+report and URL input without clearing its draft. Esc closes a preview; while
+copying, Esc asks Transmute to stop between files. Completed copies stay done,
+and `/sync retry` reopens the failed or cancelled rows. Sync only adds files; it
+does not delete phone or computer files or replace existing files.
+
+`/sync music` explains the manual Mac workflow: import the output folder into
+Music, then use Finder's iPhone Music sync. Copying files to a folder does not
+register them in Apple Music, and exporting tracks back from the iPhone Music
+library is unsupported.
+
 ## Commands
 
 | Command | Description |
@@ -174,15 +196,18 @@ automatically.
 | `↑` / `↓` | select failed or low-confidence History entries — Enter retries a failure; low-confidence entries open an inline hint input |
 | `/list` | show recent converted and failed tracks across sessions |
 | `/retry` | requeue all retryable failed downloads |
+| `/sync [spotify\|music\|retry]` | preview additive Spotify sync, show the Mac Music/Finder handoff, or reopen failed/cancelled rows |
 | `/login [codex\|claude]` | log in to a subscription provider (opens browser) |
 | `/logout [codex\|claude]` | log out of a subscription provider |
 | `/clear` | clear completed and failed activity from the screen and persistent history |
 | `/help` | show the full command reference while keeping URL and command input live; Esc closes help |
 | `/quit` | exit (also `/exit`, `/q`, Ctrl-D, or double Ctrl-C) |
 
-The main input remains available while `/help` is open or `/out` is editing a
-folder. While the folder editor is open, press Tab (when no completion menu is
-active) or Shift-Tab to switch between it and URL input. Directory completion
+The main input remains available while `/help`, `/sync`, or `/out` is open.
+With the sync report open, press Tab or Shift-Tab to switch focus; its selection
+shortcuts only apply while the report has focus. While the folder editor is
+open, press Tab (when no completion menu is active) or Shift-Tab to switch
+between it and URL input. Directory completion
 continues to use Tab in the folder editor. Folder edits take effect only after
 Enter confirms them; downloads submitted before then use the currently applied
 settings. With help open, scroll over the command reference with the mouse wheel
@@ -224,6 +249,8 @@ main
         ├── prompt_toolkit adapters (layout, keys, commands, widgets, style)
         ├── downloader (yt-dlp/ffmpeg)
         ├── enrich (provider calls + normalized tags + ID3 writes)
+        ├── sync (preview, selection results, safe local/phone transfer)
+        │     └── iphone (USB Spotify Documents adapter)
         └── settings, history (durable local storage)
 ```
 
@@ -249,6 +276,8 @@ Services
 
 - `transmute/downloader.py` — local yt-dlp/ffmpeg pipeline
 - `transmute/enrich.py` — provider selection, web research, and ID3 tagging
+- `transmute/sync.py` — read-only MP3 comparison plans and explicit transfers
+- `transmute/iphone.py` — USB-only adapter for Spotify's vended Documents folder
 - `transmute/settings.py` — persistent output directory and bitrate storage
 - `transmute/history.py` — persistent download activity storage
 
@@ -268,8 +297,9 @@ Transmute is licensed under the [GNU General Public License v3.0 or later](LICEN
 
 Copyright (C) 2026 vznh.
 
-The licence is copyleft because a dependency requires it, not by preference:
+The licence is copyleft because dependencies require it, not by preference:
 `transmute/enrich.py` imports [mutagen](https://github.com/quodlibet/mutagen)
-to write ID3 frames, and mutagen is GPL-2.0-or-later, so the distributed
-combination cannot carry more permissive terms. ffmpeg is a separate program
-invoked as a subprocess and does not affect this.
+to write ID3 frames (GPL-2.0-or-later), and the USB sync adapter uses
+[pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (GPL-3.0-or-later).
+The project is GPL-3.0-or-later to remain compatible with both. ffmpeg is a
+separate program invoked as a subprocess and does not affect this.

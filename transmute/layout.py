@@ -72,7 +72,11 @@ def build_layout(app, history_file: Path) -> Layout:
             ScrollableHelpControl(app._render_help, app.scroll_help), wrap_lines=True
         )
     )
-    normal_content = Condition(lambda: not app.help_open)
+    app.sync_control = ScrollableHelpControl(app._render_sync, app.sync_scroll, focusable=True)
+    app.sync_pane = ScrollablePane(
+        Window(app.sync_control, wrap_lines=False), keep_cursor_visible=False
+    )
+    normal_content = Condition(lambda: not app.help_open and not app.sync_open)
 
     root = HSplit(
         [
@@ -99,6 +103,7 @@ def build_layout(app, history_file: Path) -> Layout:
                 filter=normal_content,
             ),
             ConditionalContainer(app.help_pane, filter=Condition(lambda: app.help_open)),
+            ConditionalContainer(app.sync_pane, filter=Condition(lambda: app.sync_open)),
             Window(height=1, char="─", style="class:rule"),
             ConditionalContainer(
                 dir_window, filter=Condition(lambda: app.dir_picker is not None)
