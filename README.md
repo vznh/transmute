@@ -68,19 +68,19 @@ do not work. Once it is released, the version must be pinned, because Transmute
 is an alpha and both resolvers skip prereleases unless asked by name:
 
 ```sh
-uv tool install "transmute-cli==0.2.1a0"   # or: pipx install "transmute-cli==0.2.1a0"
+uv tool install "transmute-cli==0.2.2a0"   # or: pipx install "transmute-cli==0.2.2a0"
 brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 0.2.1a
+transmute --version   # transmute 0.2.2a
 ```
 
-`brew list --versions transmute` reports `0.2.1` for the same build. Homebrew
+`brew list --versions transmute` reports `0.2.2` for the same build. Homebrew
 parses the version out of the release tag and drops the alpha suffix; PyPI will
-normalise it the other way, to `0.2.1a0`. All three name one release.
+normalise it the other way, to `0.2.2a0`. All three name one release.
 
 ## Requirements
 
@@ -167,7 +167,7 @@ automatically.
 
 | Command | Description |
 | --- | --- |
-| `/out [dir]` | show the output directory; with no arg, opens an inline prompt (pre-filled with `~/`) to change it — enter/esc keeps it |
+| `/out [dir]` | show or set the output directory; a bare name or folder-editor entry is under `~/`; with no arg, opens a separate `~/` editor — Tab (or Shift-Tab) switches focus, Enter applies, Esc cancels |
 | `/quality [128\|192\|256\|320]` | show or set MP3 bitrate |
 | `/enrich [codex\|claude\|api\|on\|off]` | choose or toggle web-search metadata enrichment |
 | `/key [clear]` | securely enter one OpenAI or Anthropic API key, or clear it |
@@ -177,8 +177,17 @@ automatically.
 | `/login [codex\|claude]` | log in to a subscription provider (opens browser) |
 | `/logout [codex\|claude]` | log out of a subscription provider |
 | `/clear` | clear completed and failed activity from the screen and persistent history |
-| `/help` | show the full command reference on screen |
+| `/help` | show the full command reference while keeping URL and command input live; Esc closes help |
 | `/quit` | exit (also `/exit`, `/q`, Ctrl-D, or double Ctrl-C) |
+
+The main input remains available while `/help` is open or `/out` is editing a
+folder. While the folder editor is open, press Tab (when no completion menu is
+active) or Shift-Tab to switch between it and URL input. Directory completion
+continues to use Tab in the folder editor. Folder edits take effect only after
+Enter confirms them; downloads submitted before then use the currently applied
+settings. With help open, PageUp and PageDown scroll the command reference. If
+`/help` and `/out` are both open, Esc closes the folder editor first, then closes
+help on the next press.
 
 ## Development
 

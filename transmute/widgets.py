@@ -15,8 +15,7 @@ class HomeDirCompleter(Completer):
 
     The picker holds only the path *relative to home* in the input buffer (the
     "~/" is a fixed prompt prefix), so completions resolve against
-    ``Path.home()``. `active` gates completion so the shared input buffer stays
-    plain when it is being used to paste URLs.
+    ``Path.home()``. `active` gates completion to the folder editor's input stage.
     """
 
     def __init__(self, active: Callable[[], bool]) -> None:

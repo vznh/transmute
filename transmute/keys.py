@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from prompt_toolkit.filters import Condition, has_focus
+from prompt_toolkit.filters import Condition, has_completions, has_focus
 from prompt_toolkit.key_binding import KeyBindings
 
 
@@ -14,7 +14,7 @@ def _exit_shortcut() -> str:
 
 def build_key_bindings(app) -> KeyBindings:
     kb = KeyBindings()
-    # No overlay of any kind: the plain URL-input state.
+    # Main input actions remain live while help and the folder editor are shown.
     no_overlay = Condition(
         lambda: app.modal is None and app.dir_picker is None and not app.help_open
     )
@@ -27,6 +27,7 @@ def build_key_bindings(app) -> KeyBindings:
     picker_confirm = Condition(
         lambda: app.dir_picker is not None and app.dir_picker.stage == "confirm"
     )
+    dir_focused = has_focus(app.dir_buffer)
 
     @kb.add("up", filter=has_actionable)
     def _(event):
@@ -36,21 +37,21 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         app._move_sel(1)
 
-    @kb.add("y", filter=picker_confirm)
+    @kb.add("y", filter=picker_confirm & dir_focused)
     def _(event):
         app._dir_confirm_create()
 
-    @kb.add("n", filter=picker_confirm)
+    @kb.add("n", filter=picker_confirm & dir_focused)
     def _(event):
         app._dir_decline_create()
 
     @kb.add("escape", eager=True)
     def _(event):
-        if app.help_open:
-            app.close_help()
-            return
         if app.dir_picker is not None:
             app.close_dir_picker()
+            return
+        if app.help_open:
+            app.close_help()
             return
         if app.modal:
             app.close_modal()
@@ -64,11 +65,11 @@ def build_key_bindings(app) -> KeyBindings:
     @kb.add("c-c")
     def _(event):
         now = time.monotonic()
-        if app.help_open:
-            app.close_help()
-            return
         if app.dir_picker is not None:
             app.close_dir_picker()
+            return
+        if app.help_open:
+            app.close_help()
             return
         if app.has_selection():
             app.clear_selection()
@@ -99,11 +100,23 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         event.app.exit()
 
-    # While help is open the input line is inert: swallow every other key so it
-    # can't edit the URL buffer behind the overlay. escape/c-c/c-d are matched by
-    # their specific bindings above and take priority over this catch-all.
-    @kb.add("<any>", filter=Condition(lambda: app.help_open))
+    @kb.add(
+        "tab",
+        filter=Condition(lambda: app.dir_picker is not None) & ~has_completions,
+    )
     def _(event):
-        pass
+        app.toggle_dir_focus()
+
+    @kb.add("s-tab", filter=Condition(lambda: app.dir_picker is not None))
+    def _(event):
+        app.toggle_dir_focus()
+
+    @kb.add("pageup", filter=Condition(lambda: app.help_open))
+    def _(event):
+        app.scroll_help(-10)
+
+    @kb.add("pagedown", filter=Condition(lambda: app.help_open))
+    def _(event):
+        app.scroll_help(10)
 
     return kb

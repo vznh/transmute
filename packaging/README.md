@@ -2,8 +2,8 @@
 
 Two distribution channels share one tagged release: PyPI (for `uv tool install`
 and `pipx`) and a Homebrew tap (for `brew install`). The tag drives PyPI
-automatically; the tap is updated by hand because it lives in another
-repository.
+automatically; the Homebrew formula is regenerated and committed here after the
+tag is pushed.
 
 ## One-time setup
 
@@ -47,17 +47,17 @@ These steps need account access and cannot be done from this repository.
 1. Bump `__version__` in `transmute/__init__.py`. It is the only place the
    version is written; `pyproject.toml` reads it.
 
-2. Tag and push. Tags are bare versions, matching the existing `0.1a`:
+2. Tag and push. Tags are bare versions, for example:
 
    ```sh
-   git tag 0.2a
-   git push origin 0.2a
+   git tag 0.2.2a
+   git push origin 0.2.2a
    ```
 
    `release.yml` compares the tag to the built artifact as PEP 440 versions and
    fails on a mismatch. That comparison is deliberately not a string match:
-   packaging normalises `0.2a` to `0.2a0`, so the tag and the filename
-   `transmute_cli-0.2a0.tar.gz` differ in text while naming one release.
+   packaging normalises `0.2.2a` to `0.2.2a0`, so the tag and the filename
+   `transmute_cli-0.2.2a0.tar.gz` differ in text while naming one release.
 
    The workflow runs the suite on Python 3.10 through 3.13, publishes to PyPI,
    and attaches the sdist to a GitHub release, marked as a prerelease when the

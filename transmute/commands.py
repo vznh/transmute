@@ -9,11 +9,10 @@ from pathlib import Path
 
 from .config import QUALITIES
 
-# The command reference shown by /help. Rendered as a full-screen takeover
-# (see App.open_help) rather than streamed through the transient message log,
-# so no rows get clipped.
+# The command reference shown in the scrollable /help panel above the live
+# prompt, rather than streamed through the transient message log.
 HELP_ROWS = [
-    ("/out [dir]", "set output dir — arg is quick; no arg opens the picker"),
+    ("/out [dir]", "show or set output dir; no arg opens a separate ~/ editor"),
     ("/quality [128|192|256|320]", "show or set MP3 bitrate (kbps)"),
     ("/enrich [codex|claude|api|on|off]", "choose or toggle metadata enrichment"),
     ("/key [clear]", "securely set or clear one API key"),
@@ -22,7 +21,7 @@ HELP_ROWS = [
     ("/login [codex|claude]", "log in to a subscription provider"),
     ("/logout [codex|claude]", "log out of a subscription provider"),
     ("/clear", "clear history and messages"),
-    ("/help", "show this command reference"),
+    ("/help", "show commands while keeping URL input live; Esc closes help"),
     ("/quit", "exit (or ctrl-d / double ctrl-c)"),
     ("↑/↓", "select failed or low-confidence entries in History"),
 ]
@@ -63,7 +62,8 @@ class Commands:
         """`/out <dir>` sets the directory in one shot (resolve, auto-create,
         set). `/out` with no arg opens the interactive picker: the prompt is
         rooted at ~/ (uneditable), completes real folder names as you type, and
-        offers to create a missing folder. Esc cancels."""
+        offers to create a missing folder. URL input remains live; Enter applies
+        the folder and Esc cancels."""
         if arg:
             self._set_out_dir(arg)
             return

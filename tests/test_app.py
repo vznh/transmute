@@ -13,8 +13,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.data_structures import Size
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.output import DummyOutput
 
 from transmute.app import App, Entry
 from transmute.config import Settings
@@ -52,6 +56,34 @@ def test_display_name_prefers_path(app):
     assert app._display_name(job) == "Artist - Song.mp3"
     assert app._display_name(Job(url="u", title="Song")) == "Song"
     assert app._display_name(Job(url="u")) == "u"
+
+
+def test_header_shows_codex_before_claude_when_both_connected(app):
+    app.enricher.cli_states = {"claude": "signed_in", "codex": "signed_in"}
+
+    fragments = app._render_header()
+
+    assert fragments[-1] == ("class:ok", "  Codex is connected.\n")
+
+
+def test_header_shows_claude_when_only_claude_is_connected(app):
+    app.enricher.cli_states = {"claude": "signed_in", "codex": "missing"}
+
+    assert app._render_header()[-1] == ("class:ok", "  Claude is connected.\n")
+
+
+def test_header_offers_login_for_installed_cli_or_key_when_none(app):
+    app.enricher.cli_states = {"claude": "signed_out", "codex": "signed_out"}
+    assert app._render_header()[-1] == (
+        "class:err",
+        "  No provider is connected. Get started with /login codex.\n",
+    )
+
+    app.enricher.cli_states = {"claude": "missing", "codex": "missing"}
+    assert app._render_header()[-1] == (
+        "class:err",
+        "  No provider is connected. Get started with /key.\n",
+    )
 
 
 def test_recheck_signin_posts_one_success_message(app, monkeypatch):
@@ -474,48 +506,46 @@ def test_out_arg_sets_dir_in_one_shot(app, tmp_path, monkeypatch):
 def test_out_no_arg_opens_picker_with_locked_home_prefix(app):
     app.commands.cmd_out("")
     assert app.dir_picker is not None and app.dir_picker.stage == "input"
-    assert app.input_buffer.text == ""  # "~/" is a prefix, not editable buffer text
-    assert app._input_prefix() == [("class:prompt", "❯ "), ("class:accent", "~/")]
-    assert app._input_hint() == [
-        ("class:input.hint", "  esc to cancel output directory change")
-    ]
+    assert app.dir_buffer.text == ""  # "~/" is a fixed prefix
+    assert app.input_buffer.text == ""
+    assert app._dir_prefix() == [("class:accent", "Output folder ~/ ")]
 
 
 def test_out_picker_existing_path_sets_dir_and_closes(app):
     app.commands.cmd_out("")
-    app.input_buffer.text = ""  # empty relative path → ~/ itself, which exists
-    app._accept(app.input_buffer)
+    app.dir_buffer.text = ""  # empty relative path → ~/ itself, which exists
+    app._accept(app.dir_buffer)
     assert app.dir_picker is None
     assert app.settings.out_dir == Path.home()
 
 
 def test_out_picker_missing_path_prompts_to_create(app):
     app.commands.cmd_out("")
-    app.input_buffer.text = "no-such-folder-xyz/deep"
-    app._accept(app.input_buffer)
+    app.dir_buffer.text = "no-such-folder-xyz/deep"
+    app._accept(app.dir_buffer)
     picker = app.dir_picker
     assert picker is not None and picker.stage == "confirm"
     assert picker.typed == "no-such-folder-xyz/deep"
     assert picker.pending == Path.home() / "no-such-folder-xyz/deep"
-    assert app.input_buffer.text == ""  # cleared while asking y/n
-    assert "(y/n)" in app._input_placeholder()
+    assert app.dir_buffer.text == ""  # cleared while asking y/n
+    assert "(y/n)" in app._dir_placeholder()
 
 
 def test_out_picker_decline_returns_to_path_input(app):
     app.commands.cmd_out("")
-    app.input_buffer.text = "no-such-folder-xyz"
-    app._accept(app.input_buffer)
+    app.dir_buffer.text = "no-such-folder-xyz"
+    app._accept(app.dir_buffer)
     app._dir_decline_create()  # 'n'
     assert app.dir_picker.stage == "input"
-    assert app.input_buffer.text == "no-such-folder-xyz"  # restored for editing
+    assert app.dir_buffer.text == "no-such-folder-xyz"  # restored for editing
     assert app.dir_picker.pending is None
 
 
 def test_out_picker_confirm_creates_folder_and_sets_dir(app, tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     app.commands.cmd_out("")
-    app.input_buffer.text = "fresh/nested"
-    app._accept(app.input_buffer)
+    app.dir_buffer.text = "fresh/nested"
+    app._accept(app.dir_buffer)
     app._dir_confirm_create()  # 'y'
     target = tmp_path / "fresh/nested"
     assert target.is_dir()
@@ -528,8 +558,74 @@ def test_out_picker_escape_cancels_without_changing_dir(app):
     before = app.settings.out_dir
     app.commands.cmd_out("")
     app.close_dir_picker()  # esc
-    assert app.dir_picker is None and app.input_buffer.text == ""
+    assert app.dir_picker is None and app.dir_buffer.text == ""
     assert app.settings.out_dir == before
+
+
+def test_main_and_directory_drafts_survive_focus_switching(app):
+    app.input_buffer.text = "https://youtu.be/draft"
+    app.commands.cmd_out("")
+    app.dir_buffer.text = "Music"
+
+    app.toggle_dir_focus()
+    assert app.app.layout.current_buffer is app.dir_buffer
+    app.toggle_dir_focus()
+    assert app.app.layout.current_buffer is app.input_buffer
+    assert app.input_buffer.text == "https://youtu.be/draft"
+    assert app.dir_buffer.text == "Music"
+
+
+@pytest.mark.parametrize("folder_focused", [False, True])
+def test_escape_closes_folder_before_help_and_preserves_main_draft(app, folder_focused):
+    app.input_buffer.text = "https://youtu.be/draft"
+    app.open_help()
+    app.commands.cmd_out("")
+    if folder_focused:
+        app.toggle_dir_focus()
+    escape = app.app.key_bindings.get_bindings_for_keys((Keys.Escape,))[-1]
+
+    escape.handler(SimpleNamespace())
+
+    assert app.dir_picker is None
+    assert app.help_open
+    assert app.input_buffer.text == "https://youtu.be/draft"
+
+    escape.handler(SimpleNamespace())
+    assert not app.help_open
+
+
+def test_directory_edit_does_not_block_main_url_submission(app):
+    submitted = []
+    original_settings = app.settings_snapshot()
+    app.submit_urls = lambda urls: submitted.append((urls, app.settings_snapshot()))
+    app.input_buffer.text = "https://youtu.be/live"
+    app.commands.cmd_out("")
+    app.dir_buffer.text = "unapplied"
+
+    app._accept(app.input_buffer)
+
+    assert submitted == [(["https://youtu.be/live"], original_settings)]
+    assert app.dir_picker is not None
+    assert app.dir_buffer.text == "unapplied"
+
+
+def test_folder_confirmation_bindings_require_directory_focus(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    app.commands.cmd_out("")
+    app.dir_buffer.text = "fresh"
+    app._accept(app.dir_buffer)
+    y_binding = app.app.key_bindings.get_bindings_for_keys(("y",))[-1]
+    n_binding = app.app.key_bindings.get_bindings_for_keys(("n",))[-1]
+
+    app.app.layout.focus(app.input_buffer)
+    with set_app(app.app):
+        assert not y_binding.filter()
+        assert not n_binding.filter()
+
+    app.app.layout.focus(app.dir_buffer)
+    with set_app(app.app):
+        assert y_binding.filter()
+        assert n_binding.filter()
 
 
 def test_status_line_shows_labeled_settings_after_hint(app, tmp_path):
@@ -601,7 +697,7 @@ def test_help_opens_takeover_with_full_command_reference(app):
     # /out is the first row — the one the old message-log render clipped.
     for cmd in ("/out", "/quality", "/enrich", "/quit"):
         assert cmd in body
-    assert app._input_hint() == [("class:input.hint", "  esc closes help")]
+    assert "esc closes" in app._input_hint()[0][1]
 
 
 def test_help_body_replaces_processing_and_history(app):
@@ -615,12 +711,95 @@ def test_help_body_replaces_processing_and_history(app):
     assert below == []
 
 
-def test_help_escape_closes_and_input_stays_inert(app):
+def test_help_escape_closes_and_preserves_live_input(app):
+    app.input_buffer.text = "https://youtu.be/draft"
     app.open_help()
     assert app.help_open is True
-    app._accept(app.input_buffer)  # enter is a no-op while help is open
+    assert app.input_buffer.text == "https://youtu.be/draft"
+    app.close_help()
+    assert app.help_open is False
+    assert app.input_buffer.text == "https://youtu.be/draft"
+
+
+def test_help_accepts_live_urls_and_keeps_help_open(app):
+    submitted = []
+    app.submit_urls = lambda urls: submitted.append(urls)
+    app.open_help()
+    app.input_buffer.text = "https://youtu.be/live"
+
+    app._accept(app.input_buffer)
+
+    assert submitted == [["https://youtu.be/live"]]
+    assert app.help_open
     app.close_help()  # esc
     assert app.help_open is False
+    assert app.input_buffer.text == "https://youtu.be/live"
+
+
+@pytest.mark.parametrize("rows, columns", [(24, 40), (24, 80), (35, 100)])
+def test_help_and_both_inputs_fit_small_terminals(app, rows, columns):
+    app.open_help()
+    app.commands.cmd_out("")
+    rendered_screens = []
+    app.app.after_render += lambda _app: rendered_screens.append(
+        _app.renderer.last_rendered_screen
+    )
+
+    async def render_once():
+        class SizedDummyOutput(DummyOutput):
+            def get_size(self):
+                return Size(rows=rows, columns=columns)
+
+        with create_pipe_input() as pipe:
+            pipe.send_text("\x04")
+            app.app.input = pipe
+            app.app.output = SizedDummyOutput()
+            await app.app.run_async()
+
+    asyncio.run(render_once())
+    screen = rendered_screens[0]
+    rendered = "\n".join(
+        "".join(cell.char for _, cell in sorted(row.items())).rstrip()
+        for _, row in sorted(screen.data_buffer.items())
+    )
+
+    assert "Output folder ~/" in rendered
+    assert "❯ Paste a YouTube or SoundCloud link" in rendered
+
+
+def test_help_page_down_reaches_end_without_moving_input_focus(app):
+    app.open_help()
+    class SizedDummyOutput(DummyOutput):
+        def get_size(self):
+            return Size(rows=24, columns=40)
+
+    app.app.output = SizedDummyOutput()
+    page_down = app.app.key_bindings.get_bindings_for_keys((Keys.PageDown,))[-1]
+    event = SimpleNamespace()
+    rendered_screens = []
+    app.app.after_render += lambda _app: rendered_screens.append(
+        _app.renderer.last_rendered_screen
+    )
+
+    for _ in range(10):
+        page_down.handler(event)
+
+    assert app.help_pane.vertical_scroll > 0
+    assert app.app.layout.current_buffer is app.input_buffer
+
+    async def render_once():
+        with create_pipe_input() as pipe:
+            pipe.send_text("\x04")
+            app.app.input = pipe
+            await app.app.run_async()
+
+    asyncio.run(render_once())
+    screen = rendered_screens[0]
+    rendered = "\n".join(
+        "".join(cell.char for _, cell in sorted(row.items())).rstrip()
+        for _, row in sorted(screen.data_buffer.items())
+    )
+    assert "/quit" in rendered
 
 
 def test_unknown_command_reports_error(app):

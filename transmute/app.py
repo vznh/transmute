@@ -58,7 +58,7 @@ class Entry:
 class DirPicker:
     """Interactive output-directory picker driven from /out (no-arg form).
 
-    The input buffer holds only the path relative to ~/ (the "~/" is a fixed,
+    The directory buffer holds only the path relative to ~/ (the "~/" is a fixed,
     uneditable prompt prefix). `stage` is "input" while a path is being typed
     and "confirm" while asking y/n to create a folder that doesn't exist yet.
     """
@@ -218,20 +218,46 @@ class App:
         return get_app().output.get_size().columns
 
     def _render_header(self):
+        provider_line, provider_style = self._provider_connection_line()
         return [
             ("", "\n"),
             ("class:header.bar", "▌ "),
             ("class:header.title", "Transmute\n"),
             ("class:header.bar", "▌ "),
             ("class:header.desc", TAGLINE + "\n"),
+            (provider_style, "  " + provider_line + "\n"),
         ]
 
+    def _provider_connection_line(self) -> tuple[str, str]:
+        states, backend, has_api_key = self.enricher.connection_snapshot()
+        if states.get("codex") == "signed_in":
+            return "Codex is connected.", "class:ok"
+        if states.get("claude") == "signed_in":
+            return "Claude is connected.", "class:ok"
+        if has_api_key:
+            label = "OpenAI API" if backend == "openai_api" else "Anthropic API"
+            return f"{label} is connected.", "class:ok"
+
+        provider = next(
+            (name for name in ("codex", "claude") if states.get(name) != "missing"),
+            None,
+        )
+        command = f"/login {provider}" if provider else "/key"
+        return (
+            f"No provider is connected. Get started with {command}.",
+            "class:err",
+        )
+
     def _render_help(self):
-        """The /help takeover body: the full command reference, rendered in one
-        pass so nothing is clipped by the rolling message log."""
+        """Render the scrollable command reference above the live prompt."""
         out = [("class:subsection", "\n  Commands\n")]
         for cmd, desc in HELP_ROWS:
             out.append(("class:dim", f"    {cmd:<34}{desc}\n"))
+        with self.lock:
+            msgs = list(self.messages)
+        if msgs:
+            out.append(("class:subsection", "\n  Recent feedback\n"))
+            out.extend((style, f"    {line[:72]}\n") for style, line in msgs[-4:])
         return out
 
     def _build(self):
@@ -293,7 +319,8 @@ class App:
         return self._build()[1]
 
     def _above_height(self):
-        return Dimension.exact(sum(text.count("\n") for _, text in self._build()[0]))
+        height = sum(text.count("\n") for _, text in self._build()[0])
+        return Dimension(min=0, preferred=height, max=height)
 
     def _toolbar(self):
         with self.lock:
@@ -314,30 +341,41 @@ class App:
         return [*self._input_hint(), ("", "  "), *self._toolbar()]
 
     def _input_prefix(self):
-        """Prompt-line prefix fragments. The picker's "~/" is rendered here
-        (not in the buffer) so it can't be edited or deleted."""
-        if self.dir_picker and self.dir_picker.stage == "input":
-            return [("class:prompt", "❯ "), ("class:accent", "~/")]
+        """Main input prefix; the directory editor renders its own prefix."""
         if self.modal:
             return [("class:prompt", self.modal.prefix)]
         return [("class:prompt", "❯ ")]
 
     def _input_placeholder(self) -> str:
-        if self.help_open:
-            return ""
-        if self.dir_picker:
-            if self.dir_picker.stage == "confirm":
-                return f"~/{self.dir_picker.typed} doesn't exist — create it? (y/n)"
-            return "type a folder under home — tab to complete, enter to set"
         if self.modal:
             return self.modal.placeholder
         return PLACEHOLDER
 
+    def _dir_prefix(self):
+        return [("class:accent", "Output folder ~/ ")]
+
+    def _dir_placeholder(self) -> str:
+        if self.dir_picker and self.dir_picker.stage == "confirm":
+            return f"~/{self.dir_picker.typed} doesn't exist — create it? (y/n)"
+        return "type a folder under home — tab to complete, enter to set"
+
     def _input_hint(self):
-        if self.help_open:
-            return [("class:input.hint", "  esc closes help")]
         if self.dir_picker is not None:
-            return [("class:input.hint", "  esc to cancel output directory change")]
+            if self.dir_buffer_focused:
+                if self.dir_picker.stage == "confirm":
+                    tip = "y/n confirms · shift-tab to URL input · esc cancels"
+                else:
+                    tip = "enter applies · shift-tab to URL input · esc cancels"
+            else:
+                tip = "type URLs or commands · shift-tab to folder · esc cancels"
+            return [("class:input.hint", f"  {tip}")]
+        if self.help_open:
+            return [
+                (
+                    "class:input.hint",
+                    "  type URLs or commands · PgUp/PgDn scroll help · esc closes",
+                )
+            ]
         with self.lock:
             notice = self.input_notice
             actionable = any(e.kind in ("err", "hint") for e in self.history)
@@ -393,8 +431,43 @@ class App:
             return
         if self._sel_kind() == "hint":
             self.app.layout.focus(self.hint_buffer)
+        elif self.dir_picker is not None and self.dir_buffer_focused:
+            self.app.layout.focus(self.dir_buffer)
         else:
             self.app.layout.focus(self.input_buffer)
+
+    @property
+    def dir_buffer_focused(self) -> bool:
+        return (
+            getattr(self, "app", None) is not None
+            and self.app.layout.current_buffer is self.dir_buffer
+        )
+
+    def toggle_dir_focus(self) -> None:
+        if self.dir_picker is None or self.modal:
+            return
+        if self.app.layout.current_buffer is self.dir_buffer:
+            self.app.layout.focus(self.input_buffer)
+        else:
+            self.app.layout.focus(self.dir_buffer)
+        self.refresh()
+
+    def scroll_help(self, delta: int) -> None:
+        if not self.help_open:
+            return
+        size = self.app.output.get_size()
+        content_width = max(size.columns - 1, 1)  # reserve the pane scrollbar
+        content_height = self.help_pane.content.preferred_height(
+            content_width, self.help_pane.max_available_height
+        ).preferred
+        # Reserve the header, rules, main input, and status rows.
+        fixed_rows = 8 + (1 if self.dir_picker is not None else 0)
+        viewport_height = max(size.rows - fixed_rows, 1)
+        max_scroll = max(content_height - viewport_height, 0)
+        self.help_pane.vertical_scroll = min(
+            max(self.help_pane.vertical_scroll + delta, 0), max_scroll
+        )
+        self.refresh()
 
     # ── state helpers (safe from any thread) ────────────────────────────
 
@@ -513,14 +586,16 @@ class App:
         with self.lock:
             self.dir_picker = DirPicker()
             self.sel = None
-        self.input_buffer.reset()
+        self.dir_buffer.reset()
+        self.app.layout.focus(self.input_buffer)
         self._update_focus()
         self.refresh()
 
     def close_dir_picker(self) -> None:
         with self.lock:
             self.dir_picker = None
-        self.input_buffer.reset()
+        self.dir_buffer.reset()
+        self.app.layout.focus(self.input_buffer)
         self.refresh()
 
     def _apply_out_dir(self, path: Path) -> None:
@@ -557,7 +632,7 @@ class App:
             self.msg("class:err", f"can't create {target}: {e}")
             picker.stage = "input"
             picker.pending = None
-            self.input_buffer.set_document(
+            self.dir_buffer.set_document(
                 Document(picker.typed, len(picker.typed)), bypass_readonly=True
             )
             self.refresh()
@@ -574,7 +649,7 @@ class App:
         rel = picker.typed
         picker.stage = "input"
         picker.pending = None
-        self.input_buffer.set_document(
+        self.dir_buffer.set_document(
             Document(rel, len(rel)), bypass_readonly=True
         )
         self.refresh()
@@ -582,7 +657,7 @@ class App:
     def open_help(self) -> None:
         self.help_open = True
         self.sel = None
-        self.input_buffer.reset()
+        self.app.layout.focus(self.input_buffer)
         self._update_focus()
         self.refresh()
 
@@ -927,9 +1002,7 @@ class App:
     # ── input handling ──────────────────────────────────────────────────
 
     def _accept(self, buff: Buffer) -> bool:
-        if self.help_open:
-            return False
-        if self.dir_picker:
+        if buff is self.dir_buffer:
             self._accept_dir(buff)
             return False
         if self.modal:

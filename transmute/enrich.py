@@ -252,9 +252,10 @@ class Enricher:
 
     def _select_subscription_backend(self) -> str:
         selected, states = self._probe_subscription_backend()
-        self.cli_states = states
-        self.backend = selected
-        self.enabled = selected != "none"
+        with self._client_lock:
+            self.cli_states = states
+            self._backend = selected
+            self._enabled = selected != "none"
         return selected
 
     @staticmethod
@@ -301,6 +302,10 @@ class Enricher:
                 and self._api_key is None
                 and not self._explicitly_disabled
             )
+
+    def connection_snapshot(self) -> tuple[dict[str, CliState], str, bool]:
+        with self._client_lock:
+            return dict(self.cli_states), self._backend, self._api_key is not None
 
     @property
     def backend_label(self) -> str:
