@@ -21,6 +21,7 @@ from typing import Literal
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout.dimension import Dimension
 
 from .commands import HELP_ROWS, Commands
@@ -112,6 +113,7 @@ class App:
             key_bindings=build_key_bindings(self),
             style=STYLE,
             full_screen=True,
+            mouse_support=Condition(lambda: self.help_open),
         )
 
     @staticmethod
@@ -373,7 +375,7 @@ class App:
             return [
                 (
                     "class:input.hint",
-                    "  type URLs or commands · PgUp/PgDn scroll help · esc closes",
+                    "  scroll over help · type URLs or commands · esc closes",
                 )
             ]
         with self.lock:

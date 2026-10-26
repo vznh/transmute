@@ -21,7 +21,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 
 from .style import HINT_PLACEHOLDER
-from .widgets import HomeDirCompleter, PlaceholderProcessor
+from .widgets import HomeDirCompleter, PlaceholderProcessor, ScrollableHelpControl
 
 
 def build_layout(app, history_file: Path) -> Layout:
@@ -68,7 +68,9 @@ def build_layout(app, history_file: Path) -> Layout:
         get_line_prefix=lambda _line_no, _wrap_count: app._dir_prefix(),
     )
     app.help_pane = ScrollablePane(
-        Window(FormattedTextControl(app._render_help), wrap_lines=True)
+        Window(
+            ScrollableHelpControl(app._render_help, app.scroll_help), wrap_lines=True
+        )
     )
     normal_content = Condition(lambda: not app.help_open)
 

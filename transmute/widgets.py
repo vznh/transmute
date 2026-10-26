@@ -5,9 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import NotImplementedType
 
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text.base import AnyFormattedText
+from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.processors import Processor, Transformation
+from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 
 
 class HomeDirCompleter(Completer):
@@ -59,3 +63,24 @@ class PlaceholderProcessor(Processor):
             text = self.text() if callable(self.text) else self.text
             return Transformation([("class:placeholder", text)])
         return Transformation(ti.fragments)
+
+
+class ScrollableHelpControl(FormattedTextControl):
+    """Formatted help content that forwards wheel scrolling to its owner."""
+
+    def __init__(
+        self, text: AnyFormattedText, on_scroll: Callable[[int], None]
+    ) -> None:
+        super().__init__(text)
+        self.on_scroll = on_scroll
+
+    def mouse_handler(
+        self, mouse_event: MouseEvent
+    ) -> None | NotImplementedType:
+        if mouse_event.event_type == MouseEventType.SCROLL_UP:
+            self.on_scroll(-3)
+            return None
+        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+            self.on_scroll(3)
+            return None
+        return NotImplemented

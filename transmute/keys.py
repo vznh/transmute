@@ -111,12 +111,4 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         app.toggle_dir_focus()
 
-    @kb.add("pageup", filter=Condition(lambda: app.help_open))
-    def _(event):
-        app.scroll_help(-10)
-
-    @kb.add("pagedown", filter=Condition(lambda: app.help_open))
-    def _(event):
-        app.scroll_help(10)
-
     return kb

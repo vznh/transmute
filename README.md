@@ -185,9 +185,9 @@ folder. While the folder editor is open, press Tab (when no completion menu is
 active) or Shift-Tab to switch between it and URL input. Directory completion
 continues to use Tab in the folder editor. Folder edits take effect only after
 Enter confirms them; downloads submitted before then use the currently applied
-settings. With help open, PageUp and PageDown scroll the command reference. If
-`/help` and `/out` are both open, Esc closes the folder editor first, then closes
-help on the next press.
+settings. With help open, scroll over the command reference with the mouse wheel
+or trackpad. If `/help` and `/out` are both open, Esc closes the folder editor
+first, then closes help on the next press.
 
 ## Development
 

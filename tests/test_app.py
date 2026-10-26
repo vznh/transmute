@@ -18,6 +18,7 @@ from prompt_toolkit.data_structures import Size
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
 from prompt_toolkit.output import DummyOutput
 
 from transmute.app import App, Entry
@@ -767,25 +768,57 @@ def test_help_and_both_inputs_fit_small_terminals(app, rows, columns):
     assert "❯ Paste a YouTube or SoundCloud link" in rendered
 
 
-def test_help_page_down_reaches_end_without_moving_input_focus(app):
+def test_help_mouse_wheel_scrolls_text_and_padding_without_changing_drafts(app):
+    app.input_buffer.text = "https://youtu.be/main-draft"
+    app.commands.cmd_out("")
+    app.dir_buffer.text = "folder-draft"
     app.open_help()
     class SizedDummyOutput(DummyOutput):
         def get_size(self):
-            return Size(rows=24, columns=40)
+            return Size(rows=24, columns=80)
 
     app.app.output = SizedDummyOutput()
-    page_down = app.app.key_bindings.get_bindings_for_keys((Keys.PageDown,))[-1]
-    event = SimpleNamespace()
-    rendered_screens = []
-    app.app.after_render += lambda _app: rendered_screens.append(
-        _app.renderer.last_rendered_screen
-    )
+    assert app.app.key_bindings.get_bindings_for_keys((Keys.PageUp,)) == []
+    assert app.app.key_bindings.get_bindings_for_keys((Keys.PageDown,)) == []
+    assert app.app.mouse_support()
+    scroll_positions = []
+    wheel_phase = 0
 
-    for _ in range(10):
-        page_down.handler(event)
+    from prompt_toolkit.data_structures import Point
 
-    assert app.help_pane.vertical_scroll > 0
-    assert app.app.layout.current_buffer is app.input_buffer
+    def wheel(event_type, x, y):
+        event = MouseEvent(
+            position=Point(x=x, y=y),
+            event_type=event_type,
+            button=MouseButton.NONE,
+            modifiers=frozenset(),
+        )
+        return app.app.renderer.mouse_handlers.mouse_handlers[y][x](event)
+
+    def after_render(_app):
+        nonlocal wheel_phase
+        if wheel_phase == 0:
+            wheel_phase = 1
+            wheel(MouseEventType.SCROLL_DOWN, 74, 6)
+            scroll_positions.append(app.help_pane.vertical_scroll)
+            wheel(MouseEventType.SCROLL_DOWN, 74, 18)
+            for _ in range(10):
+                wheel(MouseEventType.SCROLL_DOWN, 74, 6)
+            scroll_positions.append(app.help_pane.vertical_scroll)
+        elif wheel_phase == 1:
+            wheel_phase = 2
+            _app.renderer.render(_app, _app.layout)
+            bottom_screen = _app.renderer._last_screen
+            bottom = "\n".join(
+                "".join(cell.char for _, cell in sorted(row.items())).rstrip()
+                for _, row in sorted(bottom_screen.data_buffer.items())
+            )
+            assert "/quit" in bottom
+            for _ in range(12):
+                wheel(MouseEventType.SCROLL_UP, 74, 6)
+            _app.renderer.render(_app, _app.layout)
+
+    app.app.after_render += after_render
 
     async def render_once():
         with create_pipe_input() as pipe:
@@ -794,12 +827,12 @@ def test_help_page_down_reaches_end_without_moving_input_focus(app):
             await app.app.run_async()
 
     asyncio.run(render_once())
-    screen = rendered_screens[0]
-    rendered = "\n".join(
-        "".join(cell.char for _, cell in sorted(row.items())).rstrip()
-        for _, row in sorted(screen.data_buffer.items())
-    )
-    assert "/quit" in rendered
+    assert scroll_positions[0] == 3
+    assert scroll_positions[1] > 3
+    assert app.help_pane.vertical_scroll == 0
+    assert app.app.layout.current_buffer is app.input_buffer
+    assert app.input_buffer.text == "https://youtu.be/main-draft"
+    assert app.dir_buffer.text == "folder-draft"
 
 
 def test_unknown_command_reports_error(app):
