@@ -78,9 +78,12 @@ def read_version() -> str:
     return match.group(1)
 
 
-def load_packages() -> dict[str, dict[str, Any]]:
+def load_packages() -> dict[str, list[dict[str, Any]]]:
     lock = tomllib.loads(LOCK_PATH.read_text(encoding="utf-8"))
-    return {package["name"]: package for package in lock["package"]}
+    packages: dict[str, list[dict[str, Any]]] = {}
+    for package in lock["package"]:
+        packages.setdefault(package["name"], []).append(package)
+    return packages
 
 
 def marker_applies(marker: str | None) -> bool:
@@ -90,15 +93,23 @@ def marker_applies(marker: str | None) -> bool:
     return any(parsed.evaluate(environment) for environment in MARKER_ENVIRONMENTS)
 
 
-def runtime_closure(packages: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _package_for(packages: dict[str, list[dict[str, Any]]], name: str) -> dict[str, Any]:
+    for package in packages.get(name, []):
+        markers = package.get("resolution-markers")
+        if not markers or any(marker_applies(marker) for marker in markers):
+            return package
+    raise GeneratorError(f"{name} has no lockfile variant for Python {PYTHON_VERSION}")
+
+
+def runtime_closure(packages: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Transitively resolve the root package's runtime dependencies.
 
     Dev dependencies live under a separate lockfile table and are excluded, as
     are dependencies whose environment markers exclude the pinned interpreter.
     """
     try:
-        root = packages[ROOT_PACKAGE]
-    except KeyError:
+        root = _package_for(packages, ROOT_PACKAGE)
+    except GeneratorError:
         raise GeneratorError(f"{ROOT_PACKAGE} is missing from {LOCK_PATH}") from None
 
     seen: set[str] = set()
@@ -109,14 +120,14 @@ def runtime_closure(packages: dict[str, dict[str, Any]]) -> list[dict[str, Any]]
             continue
         seen.add(name)
         try:
-            package = packages[name]
-        except KeyError:
+            package = _package_for(packages, name)
+        except GeneratorError:
             raise GeneratorError(f"{name} is referenced but not locked") from None
         for dep in package.get("dependencies", []):
             if marker_applies(dep.get("marker")):
                 queue.append(dep["name"])
 
-    return [packages[name] for name in sorted(seen)]
+    return [_package_for(packages, name) for name in sorted(seen)]
 
 
 def sdist_of(package: dict[str, Any]) -> tuple[str, str]:
@@ -189,15 +200,42 @@ def render_resources(packages: list[dict[str, Any]]) -> str:
     return "\n".join(blocks)
 
 
+def native_build_dependencies(packages: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """Return Homebrew build tools and native libraries required by sdists."""
+    names = {package["name"] for package in packages if needs_compiler(package)}
+    tools: list[str] = []
+    libraries: list[str] = []
+    if names & {"jiter", "pydantic-core", "cryptography", "qh3"}:
+        tools.append("rust")
+    if "qh3" in names:
+        tools.append("cmake")
+    if "cryptography" in names:
+        tools.append("pkgconf")
+        libraries.append("openssl@3")
+    if "pillow" in names:
+        libraries.extend(("jpeg-turbo", "zlib"))
+    if "cffi" in names:
+        libraries.append("libffi")
+    return tools, libraries
+
+
 def render_formula(version: str, url: str, sha256: str, packages: list[dict[str, Any]]) -> str:
-    compiled = [package["name"] for package in packages if needs_compiler(package)]
+    build_tools, native_libraries = native_build_dependencies(packages)
     build_deps = ""
-    if compiled:
-        build_deps = (
-            f"  # {', '.join(compiled)} ship no pure-Python wheel, so pip compiles\n"
-            f"  # them from the pinned sdist and needs a Rust toolchain to do it.\n"
-            f'  depends_on "rust" => :build\n\n'
-        )
+    if build_tools or native_libraries:
+        rows = [
+            "  # Native Python resources are built from pinned sdists; these tools and",
+            "  # libraries satisfy their documented Rust, CMake, OpenSSL, image, and FFI builds.",
+        ]
+        rows.extend(f'  depends_on "{name}" => :build' for name in build_tools)
+        rows.extend(f'  depends_on "{name}"' for name in native_libraries)
+        build_deps = "\n".join(rows) + "\n\n"
+
+    openssl_env = (
+        '    ENV["OPENSSL_DIR"] = Formula["openssl@3"].opt_prefix.to_s\n'
+        if "openssl@3" in native_libraries
+        else ""
+    )
 
     return f"""class Transmute < Formula
   include Language::Python::Virtualenv
@@ -215,7 +253,7 @@ def render_formula(version: str, url: str, sha256: str, packages: list[dict[str,
 
 {render_resources(packages)}
   def install
-    virtualenv_install_with_resources
+{openssl_env}    virtualenv_install_with_resources
   end
 
   test do

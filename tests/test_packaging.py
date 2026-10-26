@@ -26,7 +26,7 @@ def closure(generator):
 
 
 def test_closure_contains_every_declared_runtime_dependency(closure):
-    assert {"anthropic", "mutagen", "openai", "prompt-toolkit", "yt-dlp"} <= closure.keys()
+    assert {"anthropic", "mutagen", "openai", "prompt-toolkit", "pymobiledevice3", "yt-dlp"} <= closure.keys()
 
 
 def test_closure_contains_transitive_dependencies(closure):
@@ -52,6 +52,16 @@ def test_closure_excludes_windows_only_dependencies(closure):
     assert "colorama" not in closure  # tqdm requires it only on win32
 
 
+def test_closure_selects_python_313_lock_variants(generator, closure):
+    packages = generator.runtime_closure(generator.load_packages())
+    selected = {package["name"]: package["version"] for package in packages}
+
+    assert selected["asgiref"] == "3.13.0"
+    assert selected["pillow"] == "13.0.0"
+    assert selected["starlette"] == "1.10.0"
+    assert closure["pymobiledevice3"]["version"] == "11.45.0"
+
+
 def test_every_resource_has_a_pinned_sdist(generator, closure):
     for package in closure.values():
         url, sha256 = generator.sdist_of(package)
@@ -61,8 +71,17 @@ def test_every_resource_has_a_pinned_sdist(generator, closure):
 
 def test_binary_only_packages_are_detected(generator, closure):
     compiled = {name for name, package in closure.items() if generator.needs_compiler(package)}
-    # These ship Rust extensions, so the formula must request a build toolchain.
-    assert compiled == {"jiter", "pydantic-core"}
+    assert compiled == {
+        "backports-zstd", "cffi", "cryptography", "jiter", "pillow",
+        "psutil", "pycryptodome", "pydantic-core", "pylzss", "qh3",
+    }
+
+
+def test_native_sdist_build_requirements_are_specific(generator, closure):
+    tools, libraries = generator.native_build_dependencies(list(closure.values()))
+
+    assert tools == ["rust", "cmake", "pkgconf"]
+    assert set(libraries) == {"jpeg-turbo", "zlib", "libffi", "openssl@3"}
 
 
 def test_github_tarball_url_uses_the_tag_verbatim(generator):
@@ -128,3 +147,11 @@ def test_rendered_formula_declares_ffmpeg_and_every_resource(generator, closure)
     assert 'depends_on "rust" => :build' in formula
     assert formula.count("  resource ") == len(closure)
     assert "transmute --version" in formula
+
+
+def test_rendered_formula_declares_native_build_requirements(generator, closure):
+    formula = generator.render_formula("9.9.9", "https://example.invalid/x.tar.gz", "0" * 64, list(closure.values()))
+
+    for dependency in ("rust", "cmake", "pkgconf", "openssl@3", "jpeg-turbo", "zlib", "libffi"):
+        assert f'depends_on "{dependency}"' in formula
+    assert 'ENV["OPENSSL_DIR"] = Formula["openssl@3"].opt_prefix.to_s' in formula

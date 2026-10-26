@@ -27,6 +27,7 @@ dependencies = [
     "anthropic>=0.60",
     "openai>=2.0",
     "mutagen>=1.47",
+    "pymobiledevice3>=11.45,<12",
 ]
 
 [project.urls]
