@@ -80,7 +80,9 @@ transmute --version   # transmute 0.2.2a
 
 `brew list --versions transmute` reports `0.2.2` for the same build. Homebrew
 parses the version out of the release tag and drops the alpha suffix; PyPI will
-normalise it the other way, to `0.2.2a0`. All three name one release.
+normalise it the other way, to `0.2.2a0`. All three name one release. The
+checkout version is now `0.2.3a`; it is not available through PyPI or Homebrew
+until that release is published.
 
 ## Requirements
 
