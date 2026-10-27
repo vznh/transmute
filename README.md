@@ -63,26 +63,23 @@ Transmute only requires `uv run transmute`. ffmpeg is not installed for you here
 
 ### From PyPI
 
-Not yet. `transmute-cli` is unpublished, so `uv tool install` and `pipx install`
-do not work. Once it is released, the version must be pinned, because Transmute
-is an alpha and both resolvers skip prereleases unless asked by name:
+`transmute-cli` is published on PyPI. Pin the alpha version because uv and pipx
+skip prereleases unless asked by name:
 
 ```sh
-uv tool install "transmute-cli==0.2.2a0"   # or: pipx install "transmute-cli==0.2.2a0"
+uv tool install "transmute-cli==0.2.3a0"   # or: pipx install "transmute-cli==0.2.3a0"
 brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 0.2.2a
+transmute --version   # transmute 0.2.3a
 ```
 
-`brew list --versions transmute` reports `0.2.2` for the same build. Homebrew
+`brew list --versions transmute` reports `0.2.3` for the same build. Homebrew
 parses the version out of the release tag and drops the alpha suffix; PyPI will
-normalise it the other way, to `0.2.2a0`. All three name one release. The
-checkout version is now `0.2.3a`; it is not available through PyPI or Homebrew
-until that release is published.
+normalise it the other way, to `0.2.3a0`. All three name one release.
 
 ## Requirements
 
