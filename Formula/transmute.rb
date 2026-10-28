@@ -3,8 +3,8 @@ class Transmute < Formula
 
   desc "Convert YouTube or SoundCloud links into rich MP3s"
   homepage "https://github.com/vznh/transmute"
-  url "https://files.pythonhosted.org/packages/8d/d6/e0d9da2db66738eb75f6aaa53ccc93bd4c4deed2d488dc7413a95ad73992/transmute_cli-1.0.1.tar.gz"
-  sha256 "358da7e289e5a0bfcfdd1d8a48e5c7cafead65adf2b69b637da8d154f5ac1574"
+  url "https://files.pythonhosted.org/packages/dd/a8/a6c5f8b481e8001656df18008b7d2876588b570e8c239fd05693876d2a41/transmute_cli-1.0.2.tar.gz"
+  sha256 "7c38060c7cd6844b3f766ea235c40e0b245982ac30611dd03f06af8e074e4096"
   license "GPL-3.0-or-later"
   head "https://github.com/vznh/transmute.git", branch: "main"
 
@@ -563,7 +563,7 @@ class Transmute < Formula
     # The literal version is asserted rather than Homebrew's `version`, which is
     # parsed from the source archive URL while the console script reports
     # __version__ verbatim.
-    assert_match "transmute 1.0.1", shell_output("#{bin}/transmute --version")
+    assert_match "transmute 1.0.2", shell_output("#{bin}/transmute --version")
     assert_match "usage: transmute", shell_output("#{bin}/transmute --help")
   end
 end
