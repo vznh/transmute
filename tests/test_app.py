@@ -1462,5 +1462,5 @@ def test_sync_exact_match_reason_is_dim_not_error_red(app):
 
     fragments = app._render_sync()
 
-    assert any(style == "class:dim" and "Exact SHA256 match" in text for style, text in fragments)
+    assert ("class:dim", "      Exact SHA256 match.\n") in fragments
     assert not any(style == "class:err" and "Exact SHA256 match" in text for style, text in fragments)

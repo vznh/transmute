@@ -383,7 +383,8 @@ class App:
                     details.append(f"{result.status}: {result.message[:80]}")
                 if details:
                     detail_style = "class:dim" if item.direction == "matched" else "class:err"
-                    out.append((detail_style, f"    {' · '.join(details)}\n"))
+                    indent = "      " if item.direction == "matched" else "    "
+                    out.append((detail_style, f"{indent}{' · '.join(details)}\n"))
         continue_index = len(items)
         marker = "❯" if cursor == continue_index else " "
         enabled = bool(selected) and not busy
