@@ -106,6 +106,7 @@ class App:
         self.sync_pane = None
         self.lock = threading.Lock()
         self.update_available = False
+        self.update_checked = False
         self.activity_lock = threading.RLock()
         self.activity_store: ActivityStore | None = activity_store
         self.session_id = ""
@@ -246,6 +247,7 @@ class App:
         provider_line, provider_style = self._provider_connection_line()
         with self.lock:
             update_available = self.update_available
+            update_checked = self.update_checked
         out = [
             ("", "\n"),
             ("class:header.bar", "▌ "),
@@ -256,6 +258,10 @@ class App:
         if update_available:
             out.append((provider_style, "  " + provider_line))
             out.append(("class:warn", "  Run `brew update; brew upgrade`"))
+            out.append(("", "\n"))
+        elif update_checked:
+            out.append((provider_style, "  " + provider_line))
+            out.append(("class:dim", "  Version is up-to-date."))
             out.append(("", "\n"))
         else:
             out.append((provider_style, "  " + provider_line + "\n"))
@@ -274,9 +280,10 @@ class App:
             )
         except (OSError, subprocess.TimeoutExpired):
             return
-        if result.returncode == 0 and result.stdout.strip():
+        if result.returncode == 0:
             with self.lock:
-                self.update_available = True
+                self.update_checked = True
+                self.update_available = bool(result.stdout.strip())
             self.refresh()
 
     def _provider_connection_line(self) -> tuple[str, str]:

@@ -89,6 +89,22 @@ def test_homebrew_update_notice_appears_inline(app, monkeypatch):
     assert run.call_args.kwargs["timeout"] == 10
 
 
+def test_homebrew_up_to_date_status_is_dim(app, monkeypatch):
+    app.enricher.cli_states = {"claude": "missing", "codex": "signed_in"}
+    monkeypatch.setattr(
+        "transmute.app.subprocess.run",
+        Mock(return_value=SimpleNamespace(returncode=0, stdout="")),
+    )
+
+    app._check_update()
+
+    assert app._render_header()[-3:] == [
+        ("class:ok", "  Codex is connected."),
+        ("class:dim", "  Version is up-to-date."),
+        ("", "\n"),
+    ]
+
+
 @pytest.mark.parametrize("result", [
     SimpleNamespace(returncode=0, stdout=""),
     SimpleNamespace(returncode=1, stdout="transmute\n"),
@@ -97,6 +113,7 @@ def test_homebrew_update_notice_hidden_without_confirmed_update(app, monkeypatch
     monkeypatch.setattr("transmute.app.subprocess.run", lambda *args, **kwargs: result)
     app._check_update()
     assert not app.update_available
+    assert app.update_checked is (result.returncode == 0)
 
 
 def test_homebrew_update_check_tolerates_missing_or_slow_brew(app, monkeypatch):
