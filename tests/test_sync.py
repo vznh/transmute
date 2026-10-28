@@ -233,7 +233,8 @@ def test_to_phone_stages_verifies_publishes_and_retry_skips_identical(setup_sync
     repeated = service.transfer(plan, selected)
 
     assert [entry.status for entry in result] == ["done"]
-    assert phone.files["song.mp3"] == b"audio bytes"
+    assert phone.files[result[0].target_name] == b"audio bytes"
+    assert result[0].target_name.startswith("song [")
     assert repeated[0].status == "done"
     assert "identical" in repeated[0].message
     assert not any(name.startswith(".transmute-sync") for name in phone.files)

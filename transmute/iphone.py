@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from typing import BinaryIO
-from uuid import uuid4
 
 _BUNDLE_ID = "com.spotify.client"
 _DOCUMENTS_ROOT = "/Documents"
@@ -150,22 +148,6 @@ class _PhoneStore:
         finally:
             self._run(self._service.fclose(handle))
 
-    def check_publish_support(self) -> None:
-        """Verify hard-link publication before uploading selected media."""
-        temporary = f".transmute-sync-{uuid4().hex}.partial"
-        probe = f".transmute-sync-{uuid4().hex}.partial"
-        try:
-            self.write_from(temporary, io.BytesIO(b""))
-            self.publish(temporary, probe)
-        except Exception:
-            with suppress(Exception):  # Cleanup must not mask the publish failure.
-                self.remove(temporary)
-            raise
-        try:
-            self.remove(probe)
-        except Exception as exc:
-            raise _sync_error("Phone publish check succeeded, but its temporary check file could not be removed.", exc) from exc
-
     def publish(self, temporary_path: str, destination_path: str) -> None:
         temporary_path = _safe_relative(temporary_path)
         destination_path = _safe_relative(destination_path)
@@ -173,27 +155,8 @@ class _PhoneStore:
             raise _sync_error("Phone publish source is not a Transmute temporary file.")
         if self._check_exists(destination_path):
             raise FileExistsError(destination_path)
-        try:
-            from pymobiledevice3.services.afc import AfcLinkType
-
-            self._run(
-                self._service.link(
-                    _remote_path(temporary_path),
-                    _remote_path(destination_path),
-                    type_=AfcLinkType.HARDLINK,
-                )
-            )
-        except FileExistsError:
-            raise
-        except Exception as exc:
-            from pymobiledevice3.services.afc import AfcError
-
-            from .sync import SyncError
-
-            if isinstance(exc, SyncError) and getattr(exc.__cause__, "status", None) == AfcError.OBJECT_EXISTS:
-                raise FileExistsError(destination_path) from exc
-            raise _sync_error("Safe phone copy unavailable. Use Finder > iPhone > Files > Spotify.", exc) from exc
-        self.remove(temporary_path)
+        # AFC rename can replace a file created between this check and the rename.
+        self._run(self._service.rename(_remote_path(temporary_path), _remote_path(destination_path)))
 
     def remove(self, relative_path: str) -> None:
         relative_path = _safe_relative(relative_path)

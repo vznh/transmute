@@ -61,6 +61,9 @@ class FakeAfc:
         if target in self.files:
             self.files[source] = self.files[target]
 
+    async def rename(self, source: str, target: str) -> None:
+        self.files[target] = self.files.pop(source)
+
     async def rm_single(self, path: str) -> None:
         self.removed.append(path)
         self.files.pop(path, None)
@@ -262,61 +265,17 @@ def test_unsafe_directory_entry_stops_inventory() -> None:
     phone._loop.close()
 
 
-def test_publish_uses_hardlink_and_only_removes_own_temp(monkeypatch: pytest.MonkeyPatch) -> None:
-    api = install_fake_api(monkeypatch, devices=[FakeDevice("usb")])
-    phone, _ = store(api["afc"])  # type: ignore[arg-type]
-    afc = api["afc"]
-    assert isinstance(afc, FakeAfc)
+def test_publish_moves_staged_file_and_rejects_existing_destination() -> None:
+    phone, afc = store()
     temporary = f".transmute-sync-{uuid4().hex}.partial"
     afc.files[f"/Documents/{temporary}"] = b"new"
-    phone.publish(temporary, "final.mp3")
-    assert afc.links == [
-        (f"/Documents/{temporary}", "/Documents/final.mp3", "hardlink")
-    ]
-    assert afc.files["/Documents/final.mp3"] == b"new"
-    assert afc.removed == [f"/Documents/{temporary}"]
     afc.files["/Documents/existing.mp3"] = b"keep"
     with pytest.raises(FileExistsError):
         phone.publish(temporary, "existing.mp3")
     assert afc.files["/Documents/existing.mp3"] == b"keep"
-    phone._loop.close()
-
-
-def test_publish_fails_closed_when_hardlinks_are_unsupported() -> None:
-    phone, afc = store()
-    temporary = f".transmute-sync-{uuid4().hex}.partial"
-    afc.files[f"/Documents/{temporary}"] = b"new"
-
-    async def unsupported_link(target: str, source: str, type_: object) -> None:
-        raise OSError("hardlinks unsupported")
-
-    afc.link = unsupported_link  # type: ignore[method-assign]
-    with pytest.raises(SyncError, match="Use Finder > iPhone > Files > Spotify"):
-        phone.publish(temporary, "final.mp3")
-    assert afc.files == {
-        "/Documents/song.mp3": b"abc",
-        f"/Documents/{temporary}": b"new",
-    }
-    assert not afc.removed
-    phone._loop.close()
-
-
-def test_afc_existing_destination_status_maps_to_file_exists() -> None:
-    from pymobiledevice3.exceptions import AfcException
-    from pymobiledevice3.services.afc import AfcError
-
-    phone, afc = store()
-    temporary = f".transmute-sync-{uuid4().hex}.partial"
-    afc.files[f"/Documents/{temporary}"] = b"new"
-
-    async def link_collision(target: str, source: str, type_: object) -> None:
-        raise AfcException("object exists", AfcError.OBJECT_EXISTS, source)
-
-    afc.link = link_collision  # type: ignore[method-assign]
-    with pytest.raises(FileExistsError):
-        phone.publish(temporary, "occupied.mp3")
-    assert f"/Documents/{temporary}" in afc.files
-    assert not afc.removed
+    phone.publish(temporary, "final.mp3")
+    assert afc.files["/Documents/final.mp3"] == b"new"
+    assert f"/Documents/{temporary}" not in afc.files
     phone._loop.close()
 
 
@@ -339,21 +298,4 @@ def test_writes_and_removes_reject_non_temporary_paths() -> None:
         phone.write_from("final.mp3", io.BytesIO(b"data"))
     with pytest.raises(SyncError, match="cleanup"):
         phone.remove("final.mp3")
-    phone._loop.close()
-
-
-def test_publish_probe_failure_preserves_existing_probe_destination(monkeypatch: pytest.MonkeyPatch) -> None:
-    phone, afc = store()
-    identifiers = iter([uuid4(), uuid4()])
-    first, second = next(identifiers), next(identifiers)
-    monkeypatch.setattr(iphone, "uuid4", lambda: next(iter_ids))
-    iter_ids = iter([first, second])
-    destination = f"/Documents/.transmute-sync-{second.hex}.partial"
-    afc.files[destination] = b"existing"
-
-    with pytest.raises(FileExistsError):
-        phone.check_publish_support()
-
-    assert afc.files[destination] == b"existing"
-    assert f"/Documents/.transmute-sync-{first.hex}.partial" not in afc.files
     phone._loop.close()

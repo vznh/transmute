@@ -385,7 +385,7 @@ class SyncService:
                     if item.direction == "to_phone" and publish_error:
                         result = SyncResult(item.id, "error", publish_error, item.target_name)
                     elif item.direction == "to_phone":
-                        result = self._to_phone(phone, plan.out_dir, item)
+                        result = self._to_phone(phone, plan.out_dir, item, manifest.get(item.id))
                     else:
                         result = self._to_computer(phone, plan.out_dir, item)
                     if result.status == "done":
@@ -399,18 +399,27 @@ class SyncService:
                     results.append(SyncResult(item.id, "error", _bounded_error(exc), item.target_name))
         return tuple(results)
 
-    def _to_phone(self, phone: PhoneStore, out_dir: Path, item: SyncItem) -> SyncResult:
+    def _to_phone(self, phone: PhoneStore, out_dir: Path, item: SyncItem, previous: dict[str, str] | None = None) -> SyncResult:
         source = _source_path(item, out_dir)
         before = source.stat()
         digest, size = _hash_file(source)
         if digest != item.track.sha256 or size != item.track.size:
             raise SyncError("Source changed after preview; preview the folders again.")
-        destination = item.target_name
+        if previous and previous.get("sha256") == item.track.sha256:
+            previous_target = previous.get("target", "")
+            if previous_target and phone.exists(previous_target) and _phone_hash(phone, previous_target) == item.track.sha256:
+                return SyncResult(item.id, "done", "Already present with identical content.", previous_target)
+        if phone.exists(item.target_name):
+            if _phone_hash(phone, item.target_name) == item.track.sha256:
+                return SyncResult(item.id, "done", "Already present with identical content.", item.target_name)
+            raise FileExistsError(item.target_name)
+        name = Path(item.target_name)
+        destination = f"{name.stem} [{uuid4().hex}]{name.suffix}"
         if phone.exists(destination):
-            if _phone_hash(phone, destination) == item.track.sha256:
-                return SyncResult(item.id, "done", "Already present with identical content.", destination)
             raise FileExistsError(destination)
         temporary = f".transmute-sync-{uuid4().hex}.partial"
+        if phone.exists(temporary):
+            raise FileExistsError(temporary)
         try:
             with source.open("rb") as stream:
                 phone.write_from(temporary, stream)
@@ -425,6 +434,8 @@ class SyncService:
                 if _phone_hash(phone, destination) == item.track.sha256:
                     return SyncResult(item.id, "done", "Already present with identical content.", destination)
                 raise
+            if _phone_hash(phone, destination) != item.track.sha256:
+                raise SyncError("Published phone file did not match; inspect it before retrying.")
             return SyncResult(item.id, "done", "Copied to phone.", destination)
         finally:
             try:

@@ -337,6 +337,8 @@ class App:
         out.append(("class:dim", f"  This computer: {getattr(plan, 'computer_name', '') or 'This computer'}\n"))
         out.append(("class:dim", f"  {plan.out_dir}\n"))
         items = list(plan.items)
+        if any(item.direction == "to_phone" for item in items):
+            out.append(("class:dim", "  Phone copies use random names; a concurrent same-name write could be replaced.\n"))
         for index, item in enumerate(items):
             result = results.get(item.id)
             selected_mark = "   " if item.direction == "matched" else "[x]" if item.id in selected else "[ ]"
