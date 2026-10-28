@@ -323,7 +323,7 @@ class App:
             copying = self.sync_transfer_active
             spinner_frame = self.sync_spinner_frame
         out = [("class:subsection", "  Preview\n")]
-        if status:
+        if status and not (plan is None and busy):
             out.append(("class:accent", f"  {status[:220]}\n"))
         if plan is None:
             if busy:

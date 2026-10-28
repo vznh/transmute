@@ -1060,6 +1060,17 @@ def test_sync_preview_filesystem_error_ends_busy_state(app):
     assert "Scanning output folder" not in text
 
 
+def test_sync_scan_current_filename_is_only_shown_in_dim_text(app):
+    app.sync_busy = True
+    app.sync_status = "PARTYNEXTDOOR - Routine Rouge.mp3"
+
+    fragments = app._render_sync()
+    matching = [(style, text) for style, text in fragments if "Routine Rouge.mp3" in text]
+
+    assert matching == [("class:dim", "    PARTYNEXTDOOR - Routine Rouge.mp3\n")]
+    assert any("Scanning" in text for _, text in fragments)
+
+
 def test_sync_error_reason_is_visible_and_retry_notice_does_not_deadlock(app):
     from transmute.sync import SyncResult
 
