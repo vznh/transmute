@@ -3,8 +3,8 @@ class Transmute < Formula
 
   desc "Convert YouTube or SoundCloud links into rich MP3s"
   homepage "https://github.com/vznh/transmute"
-  url "https://files.pythonhosted.org/packages/source/t/transmute-cli/transmute_cli-0.2.3a0.tar.gz"
-  sha256 "4ce542fe97b2783be2c2718c377324540466c742c460a9ddedf412472620e209"
+  url "https://files.pythonhosted.org/packages/source/t/transmute-cli/transmute_cli-0.2.4.tar.gz"
+  sha256 "c9e5f9f1287b51087f4d7a31fd060736356b21fee12144fe45922953b8e82b6e"
   license "GPL-3.0-or-later"
   head "https://github.com/vznh/transmute.git", branch: "main"
 
@@ -563,7 +563,7 @@ class Transmute < Formula
     # The literal version is asserted rather than Homebrew's `version`, which is
     # parsed from the url: PyPI normalises "0.2a" to "0.2a0" in the filename
     # while the console script reports __version__ verbatim.
-    assert_match "transmute 0.2.3a", shell_output("#{bin}/transmute --version")
+    assert_match "transmute 0.2.4", shell_output("#{bin}/transmute --version")
     assert_match "usage: transmute", shell_output("#{bin}/transmute --help")
   end
 end
