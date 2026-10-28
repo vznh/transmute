@@ -9,9 +9,10 @@ tag is pushed.
 
 These steps need account access and cannot be done from this repository.
 
-1. **Reserve the PyPI project.** `transmute-cli` is unclaimed. Create a
-   [pending publisher](https://pypi.org/manage/account/publishing/) so the first
-   tag can publish without an API token:
+1. **Configure PyPI Trusted Publishing.** In the `transmute-cli` project's
+   [Publishing settings](https://pypi.org/manage/account/publishing/), verify
+   that the publisher matches this GitHub repository and workflow. This lets
+   release tags publish without a stored API token:
 
    | Field | Value |
    | --- | --- |
@@ -42,52 +43,43 @@ These steps need account access and cannot be done from this repository.
    not beside its generator. No formula named `transmute` exists in
    homebrew-core, so `brew install transmute` is unambiguous once tapped.
 
-## Per release
+## Versioning and release
 
-1. Bump `__version__` in `transmute/__init__.py`. It is the only place the
-   version is written; `pyproject.toml` reads it.
+Use numeric versions only. Increment the final patch number, such as `0.2.6` to
+`0.2.7`; do not add `a`, `b`, `rc`, or other suffixes. Change the version only
+when the user requests a release. `transmute/__init__.py` is the single source
+for the package version; `pyproject.toml` reads it.
 
-2. Tag and push. Tags are bare versions, for example:
+1. Set the requested version in `transmute/__init__.py` and update the README
+   install and version examples. Run the full checks, commit, and push `main`.
+
+2. Create and push a bare numeric tag matching the version:
 
    ```sh
-   git tag 0.2.3a1
-   git push origin 0.2.3a1
+   git tag -a 0.2.7 -m "Release 0.2.7"
+   git push origin 0.2.7
    ```
 
-   `release.yml` compares the tag to the built artifact as PEP 440 versions and
-   fails on a mismatch. The PyPI sdist filename uses the version from the
-   package metadata, for example `transmute_cli-0.2.3a1.tar.gz`.
+   `release.yml` compares the tag with the built artifact and fails on a
+   mismatch. It runs checks on Python 3.10 through 3.13, publishes to PyPI, and
+   creates the GitHub release.
 
-   The workflow runs the suite on Python 3.10 through 3.13, publishes to PyPI,
-   and attaches the sdist to a GitHub release, marked as a prerelease when the
-   version is one.
+3. CI reads the published sdist URL and SHA256 from PyPI, regenerates
+   `Formula/transmute.rb` from the tagged lockfile, and commits the formula to
+   `main`. The formula update is serialized so concurrent releases cannot race.
+   No manual formula commit is needed when this job succeeds.
 
-3. Regenerate the formula once the release is on PyPI, so it picks up the real
-   sdist URL and sha256:
+If the formula-update job fails, regenerate and push the formula manually after
+confirming the release is available on PyPI:
 
    ```sh
    just formula
+   git add Formula/transmute.rb
+   git commit -m "Update Homebrew formula for 0.2.7"
+   git push origin main
    ```
 
-   Without a matching PyPI release the generator warns and writes placeholder
-   `url` and `sha256` fields, which Homebrew will reject.
-
-   The tap does not have to wait for PyPI. A pushed tag is enough on its own,
-   because GitHub serves a source tarball for it:
-
-   ```sh
-   uv run python packaging/homebrew/generate_formula.py --source github --write
-   ```
-
-   The tag is taken verbatim from `__version__`; pass `--tag` when they differ.
-   Both sources build the same package; PyPI is preferred once the project
-   exists because its sdist is the artifact the release workflow verified.
-
-4. Commit the regenerated `Formula/transmute.rb` and push it to `main`.
-   Homebrew serves a tap from its default branch, so the release is not
-   installable until the formula is on `main`.
-
-5. Verify against the real tap:
+4. Verify against the tap:
 
    ```sh
    brew tap vznh/transmute https://github.com/vznh/transmute

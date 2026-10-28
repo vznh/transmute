@@ -54,7 +54,9 @@ Run every command from the repository root.
   external dependency makes it impossible; disclose any skipped check.
 - **D11 — Regenerate the Homebrew formula:** `just formula`. Required whenever a
   runtime dependency, `uv.lock`, or `__version__` changes; the formula is
-  derived from the lockfile and must not be hand-edited.
+  derived from the lockfile and must not be hand-edited. Tagged releases update
+  and push the formula automatically after PyPI publication; use `just formula`
+  for local changes or to recover a failed formula-update job.
 
 ## 3. Product invariants
 

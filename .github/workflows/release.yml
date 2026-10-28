@@ -32,6 +32,8 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     environment: pypi
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     permissions:
       # OIDC token for PyPI Trusted Publishing; no API token is stored anywhere.
       id-token: write
@@ -64,6 +66,7 @@ jobs:
               sys.exit(f"tag {tag} does not match transmute/__init__.py (built {built})")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"prerelease={str(parsed.is_prerelease).lower()}\n")
+              handle.write(f"version={parsed}\n")
           print(f"tag {tag} matches built version {built}")
           PY
 
@@ -80,3 +83,93 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --prerelease="${{ steps.version.outputs.prerelease }}"
+
+  update-formula:
+    needs: publish
+    runs-on: ubuntu-latest
+    concurrency:
+      group: homebrew-formula-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Wait for and verify the published PyPI sdist
+        id: sdist
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          curl --fail --silent --show-error --location \
+            --retry 10 --retry-all-errors --retry-delay 5 \
+            "https://pypi.org/pypi/transmute-cli/${VERSION}/json" \
+            --output "$RUNNER_TEMP/pypi-release.json"
+          python - "$VERSION" "$RUNNER_TEMP/pypi-release.json" <<'PY'
+          import json, os, sys
+
+          version, path = sys.argv[1:]
+          with open(path, encoding="utf-8") as handle:
+              payload = json.load(handle)
+          if payload.get("info", {}).get("version") != version:
+              sys.exit("PyPI returned metadata for a different version")
+          sdists = [item for item in payload.get("urls", []) if item.get("packagetype") == "sdist"]
+          if len(sdists) != 1:
+              sys.exit(f"expected one PyPI sdist, found {len(sdists)}")
+          source = sdists[0]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"url={source['url']}\n")
+              handle.write(f"sha256={source['digests']['sha256']}\n")
+          print(f"verified PyPI sdist for {version}")
+          PY
+
+      - name: Generate formula from the released source and lockfile
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+          SDIST_URL: ${{ steps.sdist.outputs.url }}
+          SDIST_SHA256: ${{ steps.sdist.outputs.sha256 }}
+        run: >-
+          uv run --with packaging --with tomli --no-project python
+          packaging/homebrew/generate_formula.py
+          --version "$VERSION"
+          --url "$SDIST_URL"
+          --sha256 "$SDIST_SHA256"
+          --write
+
+      - name: Commit generated formula to main
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          cp Formula/transmute.rb "$RUNNER_TEMP/transmute.rb"
+          git restore --source=HEAD -- Formula/transmute.rb
+          git fetch origin main
+          git switch --detach origin/main
+          UPDATE_FORMULA=$(python - "$VERSION" Formula/transmute.rb <<'PY'
+          import re, sys
+          from pathlib import Path
+
+          target = tuple(map(int, sys.argv[1].split(".")))
+          formula = Path(sys.argv[2]).read_text(encoding="utf-8")
+          match = re.search(r"transmute_cli-(\d+\.\d+\.\d+)\.tar\.gz", formula)
+          current = tuple(map(int, match.group(1).split("."))) if match else ()
+          print(str(not current or current < target).lower())
+          PY
+          )
+          if [ "$UPDATE_FORMULA" != "true" ]; then
+            echo "Homebrew formula already has version ${VERSION} or newer"
+            exit 0
+          fi
+          cp "$RUNNER_TEMP/transmute.rb" Formula/transmute.rb
+          git add Formula/transmute.rb
+          if git diff --cached --quiet; then
+            echo "Homebrew formula already matches ${VERSION}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update Homebrew formula for ${VERSION}"
+          if ! git push origin HEAD:main; then
+            git fetch origin main
+            git rebase origin/main
+            git push origin HEAD:main
+          fi
