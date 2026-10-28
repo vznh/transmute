@@ -57,6 +57,12 @@ Run every command from the repository root.
   derived from the lockfile and must not be hand-edited. Tagged releases update
   and push the formula automatically after PyPI publication; use `just formula`
   for local changes or to recover a failed formula-update job.
+- **D12 — Start releases manually.** After changes reach `main`, run the
+  `prepare release` GitHub Actions workflow on `main`. It increments the
+  numeric patch, commits and tags the version, then dispatches the release
+  workflow. Ordinary pushes do not publish. The release workflow tests all
+  supported Python versions before publishing to PyPI, creating a GitHub
+  release, and updating the generated Homebrew formula.
 
 ## 3. Product invariants
 

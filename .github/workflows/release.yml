@@ -7,6 +7,12 @@ on:
       # accepted too because PEP 440 treats it as the same version.
       - "[0-9]*"
       - "v[0-9]*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Numeric release tag created by the release workflow
+        required: true
+        type: string
 
 concurrency:
   group: release-${{ github.ref }}
@@ -21,6 +27,8 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -41,15 +49,19 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: astral-sh/setup-uv@v6
 
       - run: uv build
 
       - name: Verify the tag matches the built version
         id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           # Compare tags to built artifacts as parsed PEP 440 versions.
-          uv run --with packaging --no-project python - "$GITHUB_REF_NAME" <<'PY'
+          uv run --with packaging --no-project python - "$RELEASE_TAG" <<'PY'
           import os, pathlib, re, sys
           from packaging.version import InvalidVersion, Version
 
@@ -75,12 +87,13 @@ jobs:
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.version }}
         run: |
           # Globbed rather than reconstructed, because the artifact carries the
           # normalised version while the tag may not.
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_TAG" \
             dist/transmute_cli-*.tar.gz \
-            --title "$GITHUB_REF_NAME" \
+            --title "$RELEASE_TAG" \
             --generate-notes \
             --prerelease="${{ steps.version.outputs.prerelease }}"
 
@@ -94,6 +107,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: astral-sh/setup-uv@v6
 
       - name: Wait for and verify the published PyPI sdist

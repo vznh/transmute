@@ -245,6 +245,11 @@ Releasing to PyPI and the Homebrew tap is described in
 [`packaging/README.md`](packaging/README.md). After a dependency or version
 change, regenerate the formula with `just formula`.
 
+To release, push changes to `main`, then manually run **Actions → prepare
+release → Run workflow** on `main`. This increments the numeric patch version,
+commits and tags it, then starts the existing test, PyPI, GitHub Release, and
+Homebrew formula pipeline. A normal push does not publish a release.
+
 ## Project map
 
 `App` owns session state and orchestration. The interface modules read that
