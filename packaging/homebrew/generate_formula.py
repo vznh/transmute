@@ -237,6 +237,20 @@ def render_formula(version: str, url: str, sha256: str, packages: list[dict[str,
         else ""
     )
 
+    install_resources = "    virtualenv_install_with_resources\n"
+    if any(package["name"] == "qh3" for package in packages):
+        install_resources = f'''    venv = virtualenv_create(libexec, "python{PYTHON_VERSION}")
+    resources.each do |resource|
+      if resource.name == "qh3"
+        # AWS-LC's jitterentropy rejects optimization; superenv replaces its -O0.
+        ENV.O0 {{ venv.pip_install resource }}
+      else
+        venv.pip_install resource
+      end
+    end
+    venv.pip_install_and_link buildpath
+'''
+
     return f"""class Transmute < Formula
   include Language::Python::Virtualenv
 
@@ -253,8 +267,7 @@ def render_formula(version: str, url: str, sha256: str, packages: list[dict[str,
 
 {render_resources(packages)}
   def install
-{openssl_env}    virtualenv_install_with_resources
-  end
+{openssl_env}{install_resources}  end
 
   test do
     # Downloading real media needs the network and a source site, so the test

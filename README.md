@@ -47,8 +47,9 @@ Three commands rather than one, for two reasons worth knowing once:
 
 Both are one-time. Later releases need only `brew upgrade transmute`.
 
-The build compiles two Rust extensions from source, so the first install takes a
-few minutes.
+Homebrew builds 104 Python dependencies from source, including native Rust and
+C extensions for iPhone sync. Allow about 10–20 minutes for the first install;
+download and compiler caches can shorten later builds.
 
 ### From a checkout
 
@@ -77,9 +78,9 @@ brew install ffmpeg                        # not included on this path
 transmute --version   # transmute 0.2.3a
 ```
 
-`brew list --versions transmute` reports `0.2.3` for the same build. Homebrew
-parses the version out of the release tag and drops the alpha suffix; PyPI will
-normalise it the other way, to `0.2.3a0`. All three name one release.
+`brew list --versions transmute` reports `0.2.3a0` for the PyPI-based formula.
+PyPI normalises the application version `0.2.3a` to `0.2.3a0`; both name the
+same release.
 
 ## Requirements
 

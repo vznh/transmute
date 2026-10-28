@@ -544,7 +544,16 @@ class Transmute < Formula
 
   def install
     ENV["OPENSSL_DIR"] = Formula["openssl@3"].opt_prefix.to_s
-    virtualenv_install_with_resources
+    venv = virtualenv_create(libexec, "python3.13")
+    resources.each do |resource|
+      if resource.name == "qh3"
+        # AWS-LC's jitterentropy rejects optimization; superenv replaces its -O0.
+        ENV.O0 { venv.pip_install resource }
+      else
+        venv.pip_install resource
+      end
+    end
+    venv.pip_install_and_link buildpath
   end
 
   test do

@@ -105,12 +105,14 @@ Environment markers are resolved against the interpreter the formula pins
 (`python@3.13`), which is why Windows-only and Python 3.10-only dependencies do
 not appear. `tests/test_packaging.py` covers that closure.
 
-`pydantic-core` and `jiter` publish no pure-Python wheel, so the formula
-requests `depends_on "rust" => :build` and pip compiles them from the pinned
-sdist. That is the slowest part of `brew install`. Making the `anthropic` and
-`openai` SDKs optional extras would remove both, along with most of the other
-resources — their imports in `transmute/enrich.py` are already lazy, so only
-the credential-selection path would need to handle a missing SDK.
+The formula builds Python resources from pinned sdists, including native Rust
+and C extensions. iPhone sync's `pymobiledevice3` dependency brings in `qh3`,
+which builds AWS-LC. AWS-LC's jitterentropy sources require `-O0`; Homebrew's
+superenv otherwise replaces that flag with its default optimization level.
+The generator installs `qh3` inside an `ENV.O0` block and restores normal
+optimization for the other resources. Preserve this scope when changing the
+install block and verify changes with a full Homebrew build, not just Ruby
+syntax checks.
 
 Regenerate the formula whenever a runtime dependency, the lockfile, or the
 version changes.

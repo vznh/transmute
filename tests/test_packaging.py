@@ -155,3 +155,25 @@ def test_rendered_formula_declares_native_build_requirements(generator, closure)
     for dependency in ("rust", "cmake", "pkgconf", "openssl@3", "jpeg-turbo", "zlib", "libffi"):
         assert f'depends_on "{dependency}"' in formula
     assert 'ENV["OPENSSL_DIR"] = Formula["openssl@3"].opt_prefix.to_s' in formula
+
+
+def test_qh3_build_disables_optimization_only_for_that_resource(generator, closure):
+    formula = generator.render_formula(
+        "0.2.3a", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
+    )
+
+    assert 'venv = virtualenv_create(libexec, "python3.13")' in formula
+    assert 'if resource.name == "qh3"\n' in formula
+    assert 'ENV.O0 { venv.pip_install resource }' in formula
+    assert 'else\n        venv.pip_install resource' in formula
+    assert 'venv.pip_install_and_link buildpath' in formula
+
+
+def test_formula_without_qh3_uses_standard_resource_install(generator, closure):
+    packages = [package for name, package in closure.items() if name != "qh3"]
+    formula = generator.render_formula(
+        "0.2.3a", "https://example.invalid/src.tar.gz", "a" * 64, packages
+    )
+
+    assert 'virtualenv_install_with_resources' in formula
+    assert 'ENV.O0' not in formula
