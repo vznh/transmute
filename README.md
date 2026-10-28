@@ -68,18 +68,18 @@ Transmute only requires `uv run transmute`. ffmpeg is not installed for you here
 skip prereleases unless asked by name:
 
 ```sh
-uv tool install "transmute-cli==0.2.3a0"   # or: pipx install "transmute-cli==0.2.3a0"
+uv tool install "transmute-cli==0.2.3a1"   # or: pipx install "transmute-cli==0.2.3a1"
 brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 0.2.3a
+transmute --version   # transmute 0.2.3a1
 ```
 
-`brew list --versions transmute` reports `0.2.3a0` for the PyPI-based formula.
-PyPI normalises the application version `0.2.3a` to `0.2.3a0`; both name the
+`brew list --versions transmute` reports `0.2.3a1` for the PyPI-based formula.
+PyPI normalises the application version `0.2.3a1` to `0.2.3a1`; both name the
 same release.
 
 ## Requirements
@@ -175,8 +175,9 @@ Nothing transfers until you select tracks and move to **Continue**.
 In the preview, use Up/Down to browse, Enter to select a row, `a` to select
 high-confidence items, and `A` to select every transferable item. Enter on
 Continue starts the selected copies. Tab or Shift-Tab switches between the
-report and URL input without clearing its draft. Esc closes a preview; while
-copying, Esc asks Transmute to stop between files. Completed copies stay done,
+report and URL input without clearing its draft. Press `q` or Esc to close the
+report; `/sync close` also works from the input line. While copying, these ask
+Transmute to stop between files. Completed copies stay done,
 and `/sync retry` reopens the failed or cancelled rows. Sync only adds files; it
 does not delete phone or computer files or replace existing files.
 
@@ -196,7 +197,7 @@ library is unsupported.
 | `↑` / `↓` | select failed or low-confidence History entries — Enter retries a failure; low-confidence entries open an inline hint input |
 | `/list` | show recent converted and failed tracks across sessions |
 | `/retry` | requeue all retryable failed downloads |
-| `/sync [spotify\|music\|retry]` | preview additive Spotify sync, show the Mac Music/Finder handoff, or reopen failed/cancelled rows |
+| `/sync [spotify\|music\|retry\|close]` | preview additive Spotify sync, show the Mac Music/Finder handoff, reopen failed/cancelled rows, or close the report |
 | `/login [codex\|claude]` | log in to a subscription provider (opens browser) |
 | `/logout [codex\|claude]` | log out of a subscription provider |
 | `/clear` | clear completed and failed activity from the screen and persistent history |

@@ -666,9 +666,9 @@ class App:
             if self.app.layout.current_control is self.sync_control:
                 with self.lock:
                     copying = self.sync_transfer_active
-                escape = "Esc stops after current file" if copying else "Esc closes"
+                escape = "q/Esc stops after this file" if copying else "q/Esc closes"
                 return [("class:input.hint", f"  ↑/↓ browse · Enter select/continue · a high confidence · A all · Tab input · {escape}")]
-            return [("class:input.hint", "  type URLs or commands · Tab sync report · Esc closes when ready")]
+            return [("class:input.hint", "  type URLs or commands · Tab sync report · /sync close exits")]
         if self.dir_picker is not None:
             if self.dir_buffer_focused:
                 if self.dir_picker.stage == "confirm":

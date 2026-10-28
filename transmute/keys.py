@@ -57,6 +57,10 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         app.sync_select(False)
 
+    @kb.add("q", filter=sync_focused, eager=True)
+    def _(event):
+        app.sync_back()
+
     @kb.add("down", filter=has_actionable & has_selection)
     def _(event):
         app._move_sel(1)

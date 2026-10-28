@@ -50,14 +50,13 @@ These steps need account access and cannot be done from this repository.
 2. Tag and push. Tags are bare versions, for example:
 
    ```sh
-   git tag 0.2.3a
-   git push origin 0.2.3a
+   git tag 0.2.3a1
+   git push origin 0.2.3a1
    ```
 
    `release.yml` compares the tag to the built artifact as PEP 440 versions and
-   fails on a mismatch. That comparison is deliberately not a string match:
-   packaging normalises `0.2.3a` to `0.2.3a0`, so the tag and the filename
-   `transmute_cli-0.2.3a0.tar.gz` differ in text while naming one release.
+   fails on a mismatch. The PyPI sdist filename uses the version from the
+   package metadata, for example `transmute_cli-0.2.3a1.tar.gz`.
 
    The workflow runs the suite on Python 3.10 through 3.13, publishes to PyPI,
    and attaches the sdist to a GitHub release, marked as a prerelease when the

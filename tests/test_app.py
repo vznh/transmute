@@ -1057,6 +1057,38 @@ def test_pipe_input_keeps_draft_and_scopes_select_all_to_sync_report(app):
     assert not app.sync_busy
 
 
+def test_sync_close_command_closes_an_unavailable_phone_preview(app):
+    app.sync_open = True
+    app.sync_busy = True
+    app.sync_focus = True
+    app.app.layout.focus(app.sync_control)
+
+    app.commands.cmd_sync("close")
+
+    assert not app.sync_open
+    assert app.sync_busy  # Closing the report does not pretend the scan finished.
+    assert app.app.layout.current_buffer is app.input_buffer
+
+
+def test_q_closes_sync_report_without_exiting_until_explicit_exit(app):
+    app.sync_open = True
+    app.sync_busy = True
+    app.sync_focus = True
+    app.app.layout.focus(app.sync_control)
+
+    async def run_keys():
+        with create_pipe_input() as pipe:
+            pipe.send_text("q\x04")
+            app.app.input = pipe
+            app.app.output = DummyOutput()
+            await app.app.run_async()
+
+    asyncio.run(run_keys())
+
+    assert not app.sync_open
+    assert app.sync_busy
+
+
 def test_sync_scroll_keeps_continue_visible_after_navigating_long_report(app):
     app.sync_plan = _sync_plan(*(_sync_item(f"track-{index}") for index in range(50)))
     app.sync_open = True
