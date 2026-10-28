@@ -937,6 +937,7 @@ def test_sync_preview_is_read_only_until_continue_and_matched_rows_are_dim(app):
     app._sync_transfer_worker(*args)
     assert service.transfers == [{"new", "maybe"}]
     assert app.sync_selected == set()
+    assert "Transfer complete" not in "".join(value for _, value in app._render_sync())
 
 
 def test_sync_high_and_all_selection_and_focus_preserve_input_draft(app):
@@ -1440,13 +1441,14 @@ def test_tagging_error_keeps_successful_download(app, monkeypatch, tmp_path):
     assert any("tagging skipped" in line for _, line in app.messages)
 
 
-def test_sync_exact_matches_have_no_checkbox_and_cannot_be_selected(app):
+def test_sync_exact_matches_have_disabled_checkbox_and_cannot_be_selected(app):
     app.sync_plan = _sync_plan(_sync_item("new"), _sync_item("matched", "matched"))
     app.sync_cursor = 1
 
     app.sync_toggle()
     assert app.sync_selected == set()
-    assert "[ ] Already synced" not in "".join(value for _, value in app._render_sync())
+    assert "[ ] Already synced" in "".join(value for _, value in app._render_sync())
+    assert ("class:disabled", "[ ]") in app._render_sync()
     app.sync_select(True)
     assert app.sync_selected == {"new"}
     app.sync_select(False)
@@ -1455,12 +1457,21 @@ def test_sync_exact_matches_have_no_checkbox_and_cannot_be_selected(app):
     assert app.sync_selected == {"new"}
 
 
-def test_sync_exact_match_reason_is_dim_not_error_red(app):
+def test_sync_exact_match_reason_is_red_and_indented(app):
     matched = _sync_item("matched", "matched")
     matched.reason = "Exact SHA256 match."
     app.sync_plan = _sync_plan(matched)
 
     fragments = app._render_sync()
 
-    assert ("class:dim", "      Exact SHA256 match.\n") in fragments
-    assert not any(style == "class:err" and "Exact SHA256 match" in text for style, text in fragments)
+    assert ("class:err", "        Exact SHA256 match.\n") in fragments
+
+
+def test_sync_preview_shows_connected_computer_and_directory(app):
+    app.sync_plan = _sync_plan(_sync_item("new"))
+    app.sync_plan.computer_name = "Test Mac"
+    fragments = app._render_sync()
+
+    assert ("class:ok", "  Connected Test iPhone\n") in fragments
+    assert ("class:ok", "  Connected Test Mac reading /music\n") in fragments
+    assert "Phone copies" not in "".join(value for _, value in fragments)

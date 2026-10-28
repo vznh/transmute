@@ -334,14 +334,11 @@ class App:
                 out.append(("class:dim", "  No preview available. Reconnect the iPhone and run /sync.\n"))
             return out
         out.append(("class:ok", f"  Connected {plan.device_name}\n"))
-        out.append(("class:dim", f"  This computer: {getattr(plan, 'computer_name', '') or 'This computer'}\n"))
-        out.append(("class:dim", f"  {plan.out_dir}\n"))
+        out.append(("class:ok", f"  Connected {getattr(plan, 'computer_name', '') or 'This computer'} reading {plan.out_dir}\n"))
         items = list(plan.items)
-        if any(item.direction == "to_phone" for item in items):
-            out.append(("class:dim", "  Phone copies use random names; a concurrent same-name write could be replaced.\n"))
         for index, item in enumerate(items):
             result = results.get(item.id)
-            selected_mark = "   " if item.direction == "matched" else "[x]" if item.id in selected else "[ ]"
+            selected_mark = "[x]" if item.id in selected and item.direction != "matched" else "[ ]"
             if item.direction == "matched":
                 label, style = "Already synced", "class:dim"
             elif item.confidence == "low":
@@ -362,7 +359,9 @@ class App:
                     style = "class:ok" if result.status == "done" else "class:err"
             marker = "❯" if index == cursor else " "
             name = item.track.relative_path.rsplit("/", 1)[-1]
-            out.append((style, f"{marker} {selected_mark} {label}: {name[:60]}\n"))
+            out.append((style, f"{marker} "))
+            out.append(("class:disabled" if item.direction == "matched" else style, selected_mark))
+            out.append((style, f" {label}: {name[:60]}\n"))
             if item.confidence == "low":
                 reason = item.reason.strip().rstrip(".")
                 prefix = "Possible duplicate based on "
@@ -372,7 +371,7 @@ class App:
                 elif reason == "Same filename has different content":
                     reason = "filename with different content"
                 explanation = f" based on {reason}" if reason else ""
-                out.append(("class:dim", f"      * Possible duplicate{explanation[:110]}\n"))
+                out.append(("class:dim", f"        * Possible duplicate{explanation[:110]}\n"))
                 if result and result.status != "done":
                     out.append(("class:err", f"        {result.status}: {result.message[:80]}\n"))
             else:
@@ -382,8 +381,8 @@ class App:
                 if result and result.status != "done":
                     details.append(f"{result.status}: {result.message[:80]}")
                 if details:
-                    detail_style = "class:dim" if item.direction == "matched" else "class:err"
-                    indent = "      " if item.direction == "matched" else "    "
+                    detail_style = "class:err"
+                    indent = "        " if item.direction == "matched" else "      "
                     out.append((detail_style, f"{indent}{' · '.join(details)}\n"))
         continue_index = len(items)
         marker = "❯" if cursor == continue_index else " "
@@ -589,7 +588,7 @@ class App:
             )
             self.sync_busy = False
             self.sync_transfer_active = False
-            self.sync_status = "Transfer complete" if not self.sync_cancel_requested else "Stopped after current file"
+            self.sync_status = "Stopped after current file" if self.sync_cancel_requested else ""
             self.sync_cancel_requested = False
         self.refresh()
 

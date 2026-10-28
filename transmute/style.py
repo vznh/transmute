@@ -9,6 +9,7 @@ STYLE = Style.from_dict(
         "header.desc": "#bbbbbb",
         "subsection": "#7dd3fc",
         "dim": "#777777",
+        "disabled": "#555555",
         "ok": "#4ade80",
         "err": "#f87171",
         "warn": "#facc15",
