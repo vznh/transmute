@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import re
+import socket
+import subprocess
 import tempfile
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -54,6 +56,7 @@ class SyncPlan:
     device_name: str
     out_dir: Path
     items: tuple[SyncItem, ...]
+    computer_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -261,6 +264,23 @@ def _manifest_key(device_id: str, out_dir: Path) -> str:
     return _fingerprint(f"{device_id}\0{out_dir.resolve()}")
 
 
+def _computer_name() -> str:
+    """Return the Mac's user-visible Computer Name with a hostname fallback."""
+    try:
+        result = subprocess.run(
+            ["scutil", "--get", "ComputerName"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()[:80]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return socket.gethostname().strip()[:80] or "This computer"
+
+
 class SyncService:
     """Build read-only plans and transfer explicitly selected files."""
 
@@ -294,6 +314,8 @@ class SyncService:
         for path in sorted(root.rglob("*")):
             if not _eligible_path(path, root) or path.resolve() in excluded:
                 continue
+            if progress:
+                progress(SyncProgress("scan_output", len(local) + 1, 0, path.name))
             try:
                 before = path.stat()
                 track = _metadata(path, path.relative_to(root).as_posix())
@@ -311,6 +333,8 @@ class SyncService:
                     continue
                 if not rel.lower().endswith(".mp3"):
                     continue
+                if progress:
+                    progress(SyncProgress("scan_phone", index, 0, Path(rel).name))
                 sink = tempfile.SpooledTemporaryFile(max_size=CHUNK_SIZE)
                 try:
                     phone.read_to(rel, sink)
@@ -321,10 +345,8 @@ class SyncService:
                 finally:
                     sink.close()
                 remote.append(TrackFile(rel, size, digest, artist, title or Path(rel).stem, duration))
-                if progress:
-                    progress(SyncProgress("scan_phone", index, 0, Path(rel).name))
             items = _build_items(local, remote)
-            return SyncPlan(phone.device_id, phone.device_name, root, tuple(items))
+            return SyncPlan(phone.device_id, phone.device_name, root, tuple(items), _computer_name())
 
     def transfer(
         self,

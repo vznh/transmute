@@ -67,17 +67,17 @@ Transmute only requires `uv run transmute`. ffmpeg is not installed for you here
 `transmute-cli` is published on PyPI. Install the current release with:
 
 ```sh
-uv tool install "transmute-cli==0.2.5"   # or: pipx install "transmute-cli==0.2.5"
+uv tool install "transmute-cli==0.2.6"   # or: pipx install "transmute-cli==0.2.6"
 brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 0.2.5
+transmute --version   # transmute 0.2.6
 ```
 
-`brew list --versions transmute` reports `0.2.5` for the PyPI-based formula.
+`brew list --versions transmute` reports `0.2.6` for the PyPI-based formula.
 The Homebrew formula installs the same PyPI release.
 
 ## Requirements
@@ -94,6 +94,9 @@ queued and processed in the background (up to 4 at a time) — the input line st
 live at the bottom, so keep pasting while earlier tracks convert. A status bar below
 the prompt shows the output dir, bitrate, and active/queued work. MP3s are written
 at 320kbps with embedded metadata and cover art, to `~/Downloads` by default.
+When Homebrew's locally cached formula information indicates an update is
+available, the header shows “Run `brew update; brew upgrade`” next to the provider
+status. Run `brew update` to refresh that information.
 
 Unsupported links are rejected as you paste them; if a paste mixes supported and
 unsupported links, the supported ones are queued and the rest are reported as

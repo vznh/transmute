@@ -73,6 +73,39 @@ def test_header_shows_claude_when_only_claude_is_connected(app):
     assert app._render_header()[-1] == ("class:ok", "  Claude is connected.\n")
 
 
+def test_homebrew_update_notice_appears_inline(app, monkeypatch):
+    app.enricher.cli_states = {"claude": "missing", "codex": "signed_in"}
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="transmute\n"))
+    monkeypatch.setattr("transmute.app.subprocess.run", run)
+
+    app._check_update()
+
+    assert app._render_header()[-3:] == [
+        ("class:ok", "  Codex is connected."),
+        ("class:warn", "  Run `brew update; brew upgrade`"),
+        ("", "\n"),
+    ]
+    assert run.call_args.kwargs["env"]["HOMEBREW_NO_AUTO_UPDATE"] == "1"
+    assert run.call_args.kwargs["timeout"] == 10
+
+
+@pytest.mark.parametrize("result", [
+    SimpleNamespace(returncode=0, stdout=""),
+    SimpleNamespace(returncode=1, stdout="transmute\n"),
+])
+def test_homebrew_update_notice_hidden_without_confirmed_update(app, monkeypatch, result):
+    monkeypatch.setattr("transmute.app.subprocess.run", lambda *args, **kwargs: result)
+    app._check_update()
+    assert not app.update_available
+
+
+def test_homebrew_update_check_tolerates_missing_or_slow_brew(app, monkeypatch):
+    for error in (FileNotFoundError(), TimeoutExpired("brew", 10)):
+        monkeypatch.setattr("transmute.app.subprocess.run", Mock(side_effect=error))
+        app._check_update()
+        assert not app.update_available
+
+
 def test_header_offers_login_for_installed_cli_or_key_when_none(app):
     app.enricher.cli_states = {"claude": "signed_out", "codex": "signed_out"}
     assert app._render_header()[-1] == (
@@ -886,7 +919,8 @@ def test_sync_preview_is_read_only_until_continue_and_matched_rows_are_dim(app):
     assert service.transfers == []
     fragments = app._render_sync()
     text = "".join(value for _, value in fragments)
-    assert "Already synced" in text and "? Possible duplicate/conflict" in text
+    assert "Already synced" in text and "* Possible duplicate" in text
+    assert "Based on close title match" in text
     assert any(style == "class:dim" and "Already synced" in value for style, value in fragments)
 
     app.sync_select(False)

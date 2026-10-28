@@ -10,7 +10,9 @@ entries retry on Enter; low-confidence entries open an inline hint input.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
+import subprocess
 import threading
 from collections import deque
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -94,6 +96,8 @@ class App:
         self.sync_selected: set[str] = set()
         self.sync_cursor = 0
         self.sync_status = ""
+        self.sync_spinner_frame = 0
+        self.sync_scan_generation = 0
         self.sync_open = False
         self.sync_focus = False
         self.sync_busy = False
@@ -101,6 +105,7 @@ class App:
         self.sync_cancel_requested = False
         self.sync_pane = None
         self.lock = threading.Lock()
+        self.update_available = False
         self.activity_lock = threading.RLock()
         self.activity_store: ActivityStore | None = activity_store
         self.session_id = ""
@@ -239,14 +244,40 @@ class App:
 
     def _render_header(self):
         provider_line, provider_style = self._provider_connection_line()
-        return [
+        with self.lock:
+            update_available = self.update_available
+        out = [
             ("", "\n"),
             ("class:header.bar", "▌ "),
             ("class:header.title", "Transmute\n"),
             ("class:header.bar", "▌ "),
             ("class:header.desc", TAGLINE + "\n"),
-            (provider_style, "  " + provider_line + "\n"),
         ]
+        if update_available:
+            out.append((provider_style, "  " + provider_line))
+            out.append(("class:warn", "  Run `brew update; brew upgrade`"))
+            out.append(("", "\n"))
+        else:
+            out.append((provider_style, "  " + provider_line + "\n"))
+        return out
+
+    def _check_update(self) -> None:
+        """Check Homebrew's cached formula metadata without blocking the UI."""
+        try:
+            result = subprocess.run(
+                ["brew", "outdated", "--formula", "--quiet", "transmute"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                env={**os.environ, "HOMEBREW_NO_AUTO_UPDATE": "1"},
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if result.returncode == 0 and result.stdout.strip():
+            with self.lock:
+                self.update_available = True
+            self.refresh()
 
     def _provider_connection_line(self) -> tuple[str, str]:
         states, backend, has_api_key = self.enricher.connection_snapshot()
@@ -290,18 +321,20 @@ class App:
             status = self.sync_status
             busy = self.sync_busy
             copying = self.sync_transfer_active
+            spinner_frame = self.sync_spinner_frame
         out = [("class:subsection", "  Preview\n")]
         if status:
-            out.append(("class:accent", f"  {status[:100]}\n"))
+            out.append(("class:accent", f"  {status[:220]}\n"))
         if plan is None:
-            message = (
-                "Scanning output folder and Spotify…"
-                if busy
-                else "No preview available. Reconnect the iPhone and run /sync."
-            )
-            out.append(("class:dim", f"  {message}\n"))
+            if busy:
+                spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[spinner_frame % 10]
+                out.append(("class:accent", f"  {spinner} Scanning\n"))
+                out.append(("class:dim", f"    {status or 'Preparing file list…'}\n"))
+            else:
+                out.append(("class:dim", "  No preview available. Reconnect the iPhone and run /sync.\n"))
             return out
         out.append(("class:ok", f"  Connected {plan.device_name}\n"))
+        out.append(("class:dim", f"  This computer: {getattr(plan, 'computer_name', '') or 'This computer'}\n"))
         out.append(("class:dim", f"  {plan.out_dir}\n"))
         items = list(plan.items)
         for index, item in enumerate(items):
@@ -328,16 +361,27 @@ class App:
             marker = "❯" if index == cursor else " "
             name = item.track.relative_path.rsplit("/", 1)[-1]
             out.append((style, f"{marker} {selected_mark} {label}: {name[:60]}\n"))
-            details = []
             if item.confidence == "low":
-                details.append("? Possible duplicate/conflict")
-            if item.reason:
-                details.append(item.reason[:56])
-            if result and result.status != "done":
-                details.append(f"{result.status}: {result.message[:80]}")
-            if details:
-                detail_style = "class:dim" if item.confidence == "low" else "class:err"
-                out.append((detail_style, f"    {' · '.join(details)}\n"))
+                out.append(("class:dim", "      * Possible duplicate\n"))
+                reason = item.reason.strip().rstrip(".")
+                prefix = "Possible duplicate based on "
+                if reason.startswith(prefix):
+                    reason = reason[len(prefix) :]
+                    reason = reason.replace("metadata or filename", "metadata and filename")
+                elif reason == "Same filename has different content":
+                    reason = "filename and different content"
+                if reason:
+                    out.append(("class:dim", f"        Based on {reason[:100]}\n"))
+                if result and result.status != "done":
+                    out.append(("class:err", f"        {result.status}: {result.message[:80]}\n"))
+            else:
+                details = []
+                if item.reason:
+                    details.append(item.reason[:56])
+                if result and result.status != "done":
+                    details.append(f"{result.status}: {result.message[:80]}")
+                if details:
+                    out.append(("class:err", f"    {' · '.join(details)}\n"))
         continue_index = len(items)
         marker = "❯" if cursor == continue_index else " "
         enabled = bool(selected) and not busy
@@ -368,18 +412,40 @@ class App:
                 self.sync_plan = None
                 self.sync_results = {}
                 self.sync_selected = set()
-                self.sync_status = "Scanning (read only)…"
+                self.sync_status = ""
+                self.sync_spinner_frame = 0
+                self.sync_scan_generation += 1
                 self.sync_focus = True
                 self.sync_pane.vertical_scroll = 0
+            generation = self.sync_scan_generation
         self.app.layout.focus(self.sync_control)
         if reopen:
             self.refresh()
             return
         try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            self.app.create_background_task(self._animate_sync_spinner(generation))
+        try:
             self.pool.submit(self._sync_preview_worker, self.settings_snapshot().out_dir, self._sync_excluded_paths())
         except Exception as error:  # noqa: BLE001 - normalize worker submission failures.
             self._publish_sync_error(error)
         self.refresh()
+
+    async def _animate_sync_spinner(self, generation: int) -> None:
+        while True:
+            await asyncio.sleep(0.1)
+            with self.lock:
+                if (
+                    generation != self.sync_scan_generation
+                    or not self.sync_busy
+                    or self.sync_plan is not None
+                ):
+                    return
+                self.sync_spinner_frame = (self.sync_spinner_frame + 1) % 10
+            self.refresh()
 
     def _get_sync_service(self) -> SyncService:
         if self.sync_service is None:
@@ -397,7 +463,13 @@ class App:
         with self.lock:
             self.sync_plan = plan
             self.sync_busy = False
-            self.sync_status = f"Preview ready · {len(plan.items)} tracks · no files changed"
+            to_phone = sum(item.direction == "to_phone" for item in plan.items)
+            to_computer = sum(item.direction == "to_computer" for item in plan.items)
+            computer_name = getattr(plan, "computer_name", "") or "This computer"
+            self.sync_status = (
+                f"Ready · {to_phone} to {plan.device_name}, "
+                f"{to_computer} to {computer_name}"
+            )
             self.sync_cursor = 0
         self.refresh()
 
@@ -405,7 +477,7 @@ class App:
         filename = getattr(progress, "filename", "")
         phase = getattr(progress, "phase", "Working")
         with self.lock:
-            self.sync_status = f"{phase} {filename}".strip()[:120]
+            self.sync_status = filename[:120] if phase.startswith("scan") else f"{phase} {filename}".strip()[:120]
         self.refresh()
 
     def _publish_sync_error(self, error: Exception) -> None:
@@ -432,9 +504,12 @@ class App:
         preceding_rows = 0
         if plan is not None:
             preceding_rows = sum(
-                1 + bool(
-                    item.confidence == "low"
-                    or item.reason
+                2
+                + bool(item.reason.strip())
+                + bool(results.get(item.id) and results[item.id].status != "done")
+                if item.confidence == "low"
+                else 1 + bool(
+                    item.reason
                     or results.get(item.id) is not None
                     and results[item.id].status != "done"
                 )
@@ -1451,6 +1526,7 @@ class App:
                 "⚠ ffmpeg not found — install it with: brew install ffmpeg",
             )
         self._startup_enrichment_notice()
+        self.pool.submit(self._check_update)
         drained = False
         try:
             try:
