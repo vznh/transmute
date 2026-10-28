@@ -45,29 +45,25 @@ These steps need account access and cannot be done from this repository.
 
 ## Versioning and release
 
-Use numeric versions only. Increment the final patch number, such as `0.2.6` to
-`0.2.7`; do not add `a`, `b`, `rc`, or other suffixes. Change the version only
-when the user requests a release. `transmute/__init__.py` is the single source
-for the package version; `pyproject.toml` reads it.
+Use numeric semantic versions only: patch increments (`0.2.6` → `0.2.7`) for
+incremental development changes, minor increments (`0.2.6` → `0.3.0`) for
+large features, and major increments (`0.2.6` → `1.0.0`) for revamps. Lower
+components reset to zero; letter suffixes are not used. `transmute/__init__.py`
+is the single source for the package version; `pyproject.toml` reads it.
 
-1. Set the requested version in `transmute/__init__.py` and update the README
-   install and version examples. Run the full checks, commit, and push `main`.
+After changes reach `main`, run **Actions → prepare release** on `main` and
+choose patch, minor, or major. The manual run is the explicit release approval;
+merging a PR or pushing directly does not publish. This keeps routine changes
+from creating releases unintentionally.
 
-2. Create and push a bare numeric tag matching the version:
+The workflow updates the version and README examples, commits the version, and
+pushes a numeric tag. That tag starts `release.yml`, which tests Python 3.10 through
+3.13, verifies the tag against the built artifact, publishes to PyPI, and
+creates the GitHub release.
 
-   ```sh
-   git tag -a 0.2.7 -m "Release 0.2.7"
-   git push origin 0.2.7
-   ```
-
-   `release.yml` compares the tag with the built artifact and fails on a
-   mismatch. It runs checks on Python 3.10 through 3.13, publishes to PyPI, and
-   creates the GitHub release.
-
-3. CI reads the published sdist URL and SHA256 from PyPI, regenerates
-   `Formula/transmute.rb` from the tagged lockfile, and commits the formula to
-   `main`. The formula update is serialized so concurrent releases cannot race.
-   No manual formula commit is needed when this job succeeds.
+After PyPI publication, CI reads the sdist URL and SHA256, regenerates
+`Formula/transmute.rb` from the tagged lockfile, and commits the formula to
+`main`. No manual formula commit is needed when this job succeeds.
 
 If the formula-update job fails, regenerate and push the formula manually after
 confirming the release is available on PyPI:

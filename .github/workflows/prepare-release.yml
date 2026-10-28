@@ -2,13 +2,19 @@ name: prepare release
 
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: Version level for a manual release
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 concurrency:
   group: prepare-release-main
   cancel-in-progress: false
 
 permissions:
-  actions: write
   contents: write
 
 jobs:
@@ -22,13 +28,19 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
 
-      - name: Increment numeric patch version
+      - name: Calculate version bump
         id: version
+        env:
+          MANUAL_BUMP: ${{ inputs.bump }}
         run: |
           python - <<'PY'
           import os
           import re
           from pathlib import Path
+
+          bump = os.environ.get("MANUAL_BUMP") or ""
+          if bump not in {"patch", "minor", "major"}:
+              raise SystemExit(f"Unsupported release level: {bump}")
 
           init = Path("transmute/__init__.py")
           source = init.read_text(encoding="utf-8")
@@ -37,7 +49,12 @@ jobs:
               raise SystemExit("Expected a numeric major.minor.patch version in transmute/__init__.py")
           major, minor, patch = map(int, match.groups())
           old = f"{major}.{minor}.{patch}"
-          new = f"{major}.{minor}.{patch + 1}"
+          if bump == "major":
+              new = f"{major + 1}.0.0"
+          elif bump == "minor":
+              new = f"{major}.{minor + 1}.0"
+          else:
+              new = f"{major}.{minor}.{patch + 1}"
           init.write_text(f'__version__ = "{new}"\n', encoding="utf-8")
 
           readme = Path("README.md")
@@ -49,7 +66,7 @@ jobs:
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={new}\n")
-          print(f"Prepared {old} -> {new}")
+          print(f"Prepared {bump} release: {old} -> {new}")
           PY
 
       - name: Commit and tag release
@@ -62,9 +79,3 @@ jobs:
           git commit -m "Release ${VERSION}"
           git tag "${VERSION}"
           git push origin HEAD:main "refs/tags/${VERSION}"
-
-      - name: Start publishing workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: gh workflow run release.yml --ref main --field release_tag="${VERSION}"

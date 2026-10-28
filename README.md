@@ -180,13 +180,11 @@ report and URL input without clearing its draft. The report hint says `Tab to
 input`; the input hint shows dim `Tab back to Sync`. Press `q` or Esc to close the
 report; `/sync close` also works from the input line. While copying, these ask
 Transmute to stop between files. Completed copies stay done,
-and `/sync retry` reopens the failed or cancelled rows. Sync only adds files; it
-does not delete phone or computer files or replace existing files.
-
-If your iPhone does not support safe phone-side publishing, use Finder: select
-the connected iPhone, open its **Files** tab, and drag the desired MP3s from the
-output folder onto **Spotify**. If Finder reports a filename conflict, keep both
-files or skip the copy. Run `/sync` again to compare the folders after copying.
+and `/sync retry` reopens the failed or cancelled rows. Phone-bound copies use a
+random filename suffix and are verified before and after publishing. The iPhone
+rename operation can replace a file created at the same destination between the
+final check and rename; the random suffix makes this unlikely, not impossible.
+Avoid concurrent copies into Spotify's folder while syncing.
 
 `/sync music` explains the manual Mac workflow: import the output folder into
 Music, then use Finder's iPhone Music sync. Copying files to a folder does not
@@ -246,9 +244,10 @@ Releasing to PyPI and the Homebrew tap is described in
 change, regenerate the formula with `just formula`.
 
 To release, push changes to `main`, then manually run **Actions → prepare
-release → Run workflow** on `main`. This increments the numeric patch version,
-commits and tags it, then starts the existing test, PyPI, GitHub Release, and
-Homebrew formula pipeline. A normal push does not publish a release.
+release → Run workflow** on `main` and choose patch, minor, or major. The
+workflow updates the version, commits and tags it, then starts the test, PyPI,
+GitHub Release, and Homebrew formula pipeline. Ordinary pushes and PR merges do
+not publish a release.
 
 ## Project map
 
