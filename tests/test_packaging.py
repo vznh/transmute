@@ -86,17 +86,15 @@ def test_native_sdist_build_requirements_are_specific(generator, closure):
 
 def test_github_tarball_url_uses_the_tag_verbatim(generator):
     # This repository tags bare versions, so no prefix may be invented.
-    assert generator.github_tarball_url("0.2a").endswith("/refs/tags/0.2a.tar.gz")
+    assert generator.github_tarball_url("0.2.5").endswith("/refs/tags/0.2.5.tar.gz")
 
 
-def test_formula_test_block_asserts_the_unnormalised_version(generator, closure):
-    # PyPI names the artifact "0.2a0" so Homebrew's own `version` would be
-    # "0.2a0", but the console script prints __version__ verbatim as "0.2a".
+def test_formula_test_block_asserts_the_application_version(generator, closure):
     formula = generator.render_formula(
-        "0.2a", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
+        "0.2.5", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
     )
 
-    assert 'assert_match "transmute 0.2a"' in formula
+    assert 'assert_match "transmute 0.2.5"' in formula
     assert "#{version}" not in formula
 
 
@@ -120,7 +118,7 @@ def test_formula_license_matches_the_project_metadata(generator, closure):
     declared = pyproject["project"]["license"]
 
     formula = generator.render_formula(
-        "0.2a", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
+        "0.2.5", "https://example.invalid/src.tar.gz", "a" * 64, list(closure.values())
     )
 
     assert generator.LICENSE_EXPRESSION == declared

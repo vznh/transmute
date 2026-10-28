@@ -158,11 +158,8 @@ class _PhoneStore:
             self.write_from(temporary, io.BytesIO(b""))
             self.publish(temporary, probe)
         except Exception:
-            for path in (temporary, probe):
-                try:
-                    self.remove(path)
-                except (OSError, FileNotFoundError):
-                    pass
+            with suppress(Exception):  # Cleanup must not mask the publish failure.
+                self.remove(temporary)
             raise
         try:
             self.remove(probe)
@@ -195,7 +192,7 @@ class _PhoneStore:
 
             if isinstance(exc, SyncError) and getattr(exc.__cause__, "status", None) == AfcError.OBJECT_EXISTS:
                 raise FileExistsError(destination_path) from exc
-            raise _sync_error("This iPhone does not support safe no-replace publishing. Transmute will not risk replacing existing files; no track was uploaded. Use Finder sync or another destination.", exc) from exc
+            raise _sync_error("Safe phone copy unavailable. Use Finder > iPhone > Files > Spotify.", exc) from exc
         self.remove(temporary_path)
 
     def remove(self, relative_path: str) -> None:

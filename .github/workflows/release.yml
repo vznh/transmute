@@ -3,7 +3,7 @@ name: release
 on:
   push:
     tags:
-      # This repository tags bare versions ("0.2a"); the v-prefixed form is
+      # This repository tags bare numeric versions ("0.2.5"); the v-prefixed form is
       # accepted too because PEP 440 treats it as the same version.
       - "[0-9]*"
       - "v[0-9]*"
@@ -46,8 +46,7 @@ jobs:
       - name: Verify the tag matches the built version
         id: version
         run: |
-          # Compared as PEP 440 versions, not strings: a "0.2a" tag builds an
-          # artifact named "0.2a0", and both forms mean the same release.
+          # Compare tags to built artifacts as parsed PEP 440 versions.
           uv run --with packaging --no-project python - "$GITHUB_REF_NAME" <<'PY'
           import os, pathlib, re, sys
           from packaging.version import InvalidVersion, Version

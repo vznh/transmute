@@ -582,12 +582,14 @@ helper remains a separate operational and product decision under P1/P2.
   `__version__`; `pyproject.toml` and the Homebrew formula are derived from it.
   Do not reintroduce a second version literal.
 - **DEP15 — Keep the release tag and the version in step.** Tags are bare
-  versions such as `0.2a`. `release.yml` compares the tag to the built artifact
-  as PEP 440 versions and fails the publish when they disagree, so a `0.2a` tag
-  matches the normalised `0.2a0` filename but a `0.3a` tag does not.
-- **DEP16 — Treat prerelease versions as user-visible.** An alpha version is
-  normalised by PyPI (`0.2a` becomes `0.2a0`) and is skipped by default
-  resolvers, so install documentation must pin it explicitly.
+  numeric versions such as `0.2.4` and must match `__version__` and the built
+  artifact. Preserve existing published tags and artifacts.
+- **DEP16 — Use numeric patch increments.** For each authorized version change,
+  increment only the final numeric component (`0.0.x`), for example `0.2.4` →
+  `0.2.5`. Do not add or increment `a`, `b`, `rc`, or other letter suffixes.
+  When moving from a legacy suffixed version, use the next numeric patch
+  version, for example `0.2.3a1` → `0.2.4`. Do not change the major or minor
+  component unless the user explicitly requests it.
 - **DEP17 — Keep the licence GPL-compatible.** `enrich.py` imports mutagen,
   which is GPL-2.0-or-later, so the distributed combination must stay
   copyleft. `pyproject.toml`, `LICENSE`, and the generated formula must agree;
@@ -595,6 +597,13 @@ helper remains a separate operational and product decision under P1/P2.
   dependency.
 - **DEP18 — Check the licence of a new dependency.** Record its SPDX expression
   and confirm compatibility with `DEP17` before adding it.
+
+- **DEP19 — Version only when explicitly requested.** Change `__version__`,
+  create a release tag, or publish a new version only after the user explicitly
+  requests a version increment or release for the current work. Finishing a
+  feature, fixing a bug, committing, pushing, or a past release request does
+  not authorize another version change. A request to document this policy is
+  not a request to increment the version.
 
 `pymobiledevice3` provides the USB lockdown, House Arrest, and AFC operations
 needed by the Spotify sync adapter. Its `GPL-3.0-or-later` licence is compatible

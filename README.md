@@ -64,23 +64,21 @@ Transmute only requires `uv run transmute`. ffmpeg is not installed for you here
 
 ### From PyPI
 
-`transmute-cli` is published on PyPI. Pin the alpha version because uv and pipx
-skip prereleases unless asked by name:
+`transmute-cli` is published on PyPI. Install the current release with:
 
 ```sh
-uv tool install "transmute-cli==0.2.4"   # or: pipx install "transmute-cli==0.2.4"
+uv tool install "transmute-cli==0.2.5"   # or: pipx install "transmute-cli==0.2.5"
 brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 0.2.4
+transmute --version   # transmute 0.2.5
 ```
 
-`brew list --versions transmute` reports `0.2.4` for the PyPI-based formula.
-PyPI normalises the application version `0.2.4` to `0.2.4`; both name the
-same release.
+`brew list --versions transmute` reports `0.2.5` for the PyPI-based formula.
+The Homebrew formula installs the same PyPI release.
 
 ## Requirements
 
@@ -181,6 +179,11 @@ report; `/sync close` also works from the input line. While copying, these ask
 Transmute to stop between files. Completed copies stay done,
 and `/sync retry` reopens the failed or cancelled rows. Sync only adds files; it
 does not delete phone or computer files or replace existing files.
+
+If your iPhone does not support safe phone-side publishing, use Finder: select
+the connected iPhone, open its **Files** tab, and drag the desired MP3s from the
+output folder onto **Spotify**. If Finder reports a filename conflict, keep both
+files or skip the copy. Run `/sync` again to compare the folders after copying.
 
 `/sync music` explains the manual Mac workflow: import the output folder into
 Music, then use Finder's iPhone Music sync. Copying files to a folder does not

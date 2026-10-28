@@ -162,7 +162,7 @@ def github_tarball_url(tag: str) -> str:
 
     This lets the tap ship before the PyPI project exists, since a tag is all
     Homebrew needs to fetch and verify a source archive. The tag is used
-    verbatim because this repository tags bare versions, such as `0.2a`.
+    verbatim because this repository tags bare versions, such as `0.2.5`.
     """
     return f"https://github.com/vznh/transmute/archive/refs/tags/{tag}.tar.gz"
 
@@ -174,7 +174,6 @@ def github_tarball(tag: str) -> tuple[str, str] | None:
 
 
 def fetch_pypi_sdist(version: str) -> tuple[str, str] | None:
-    # PyPI addresses releases by their normalised version, so "0.2a" is "0.2a0".
     url = f"https://pypi.org/pypi/transmute-cli/{Version(version)}/json"
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
@@ -274,8 +273,8 @@ def render_formula(version: str, url: str, sha256: str, packages: list[dict[str,
     # only proves the console script and its virtualenv resolve and run.
     #
     # The literal version is asserted rather than Homebrew's `version`, which is
-    # parsed from the url: PyPI normalises "0.2a" to "0.2a0" in the filename
-    # while the console script reports __version__ verbatim.
+    # parsed from the source archive URL while the console script reports
+    # __version__ verbatim.
     assert_match "transmute {version}", shell_output("#{{bin}}/transmute --version")
     assert_match "usage: transmute", shell_output("#{{bin}}/transmute --help")
   end

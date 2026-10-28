@@ -510,6 +510,7 @@ def _build_items(local: list[TrackFile], remote: list[TrackFile]) -> list[SyncIt
                 reason = (reason + " Flattened filename collision.").strip()
                 confidence = "low"
             items.append(_item(direction, track, target, confidence, reason))
+    items.sort(key=lambda item: 2 if item.direction == "matched" else 1 if item.confidence == "low" else 0)
     return items
 
 

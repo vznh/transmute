@@ -1388,3 +1388,18 @@ def test_tagging_error_keeps_successful_download(app, monkeypatch, tmp_path):
     assert app.completed[0].path == output
     assert app.history[-1].kind == "ok"
     assert any("tagging skipped" in line for _, line in app.messages)
+
+
+def test_sync_exact_matches_have_no_checkbox_and_cannot_be_selected(app):
+    app.sync_plan = _sync_plan(_sync_item("new"), _sync_item("matched", "matched"))
+    app.sync_cursor = 1
+
+    app.sync_toggle()
+    assert app.sync_selected == set()
+    assert "[ ] Already synced" not in "".join(value for _, value in app._render_sync())
+    app.sync_select(True)
+    assert app.sync_selected == {"new"}
+    app.sync_select(False)
+    assert app.sync_selected == {"new"}
+    app.sync_toggle()
+    assert app.sync_selected == {"new"}

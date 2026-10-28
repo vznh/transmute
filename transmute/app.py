@@ -306,7 +306,7 @@ class App:
         items = list(plan.items)
         for index, item in enumerate(items):
             result = results.get(item.id)
-            selected_mark = "[x]" if item.id in selected else "[ ]"
+            selected_mark = "   " if item.direction == "matched" else "[x]" if item.id in selected else "[ ]"
             if item.direction == "matched":
                 label, style = "Already synced", "class:dim"
             elif item.confidence == "low":

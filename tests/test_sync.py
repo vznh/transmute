@@ -170,9 +170,11 @@ def test_sanitized_collision_names_are_reserved_before_allocation() -> None:
 
     items = _build_items(tracks, [])
 
-    assert [item.target_name for item in items[:2]] == ["a_b.mp3", "a_b (2).mp3"]
-    assert _safe_basename(items[2].target_name).endswith(".mp3")
-    assert len(items[2].target_name.encode("utf-8")) <= 240
+    targets = {item.track.relative_path: item.target_name for item in items}
+    assert targets["a:b.mp3"] == "a_b.mp3"
+    assert targets["a?b.mp3"] == "a_b (2).mp3"
+    assert _safe_basename(targets["z" * 300 + ".mp3"]).endswith(".mp3")
+    assert len(targets["z" * 300 + ".mp3"].encode("utf-8")) <= 240
 
 
 def test_long_colliding_names_keep_distinct_suffixes_with_utf8_byte_limit() -> None:
@@ -355,3 +357,18 @@ def test_unsupported_phone_publish_fails_before_upload_and_keeps_computer_copy(s
     assert {result.status for result in results} == {"error", "done"}
     assert (out / "from-phone.mp3").read_bytes() == b"full phone track"
     assert "to-phone.mp3" not in phone.files
+
+
+def test_preview_orders_available_then_possible_duplicates_then_exact_matches(setup_sync) -> None:
+    out, phone, service = setup_sync
+    put(out / "same.mp3", b"identical")
+    put(out / "clash.mp3", b"local clash")
+    put(out / "local.mp3", b"local only")
+    phone.files.update({"same.mp3": b"identical", "clash.mp3": b"phone clash", "remote.mp3": b"phone only"})
+
+    items = service.preview(out).items
+
+    assert [(item.direction, item.confidence) for item in items] == [
+        ("to_phone", "high"), ("to_computer", "high"),
+        ("to_phone", "low"), ("to_computer", "low"), ("matched", "high"),
+    ]

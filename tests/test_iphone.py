@@ -291,7 +291,7 @@ def test_publish_fails_closed_when_hardlinks_are_unsupported() -> None:
         raise OSError("hardlinks unsupported")
 
     afc.link = unsupported_link  # type: ignore[method-assign]
-    with pytest.raises(SyncError, match="safe no-replace publishing"):
+    with pytest.raises(SyncError, match="Use Finder > iPhone > Files > Spotify"):
         phone.publish(temporary, "final.mp3")
     assert afc.files == {
         "/Documents/song.mp3": b"abc",
@@ -339,4 +339,21 @@ def test_writes_and_removes_reject_non_temporary_paths() -> None:
         phone.write_from("final.mp3", io.BytesIO(b"data"))
     with pytest.raises(SyncError, match="cleanup"):
         phone.remove("final.mp3")
+    phone._loop.close()
+
+
+def test_publish_probe_failure_preserves_existing_probe_destination(monkeypatch: pytest.MonkeyPatch) -> None:
+    phone, afc = store()
+    identifiers = iter([uuid4(), uuid4()])
+    first, second = next(identifiers), next(identifiers)
+    monkeypatch.setattr(iphone, "uuid4", lambda: next(iter_ids))
+    iter_ids = iter([first, second])
+    destination = f"/Documents/.transmute-sync-{second.hex}.partial"
+    afc.files[destination] = b"existing"
+
+    with pytest.raises(FileExistsError):
+        phone.check_publish_support()
+
+    assert afc.files[destination] == b"existing"
+    assert f"/Documents/.transmute-sync-{first.hex}.partial" not in afc.files
     phone._loop.close()
