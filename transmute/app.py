@@ -323,6 +323,8 @@ class App:
             copying = self.sync_transfer_active
             spinner_frame = self.sync_spinner_frame
         out = [("class:subsection", "  Preview\n")]
+        if plan is not None:
+            out.append(("class:dim", "  h select high confidence · s select all\n"))
         if status and not (plan is None and busy):
             out.append(("class:accent", f"  {status[:220]}\n"))
         if plan is None:
@@ -390,7 +392,7 @@ class App:
         suffix = " (sync running)" if busy else ("" if enabled else " (select tracks first)")
         out.append(("class:accent" if enabled else "class:dim", f"{marker} Continue{suffix}\n"))
         escape_hint = "Esc stops after this file" if copying else "Esc closes"
-        out.append(("class:dim", f"  ↑/↓ move · Enter select/continue · h high confidence · s select all · Tab to input · {escape_hint}\n"))
+        out.append(("class:dim", f"  ↑/↓ move · Enter select/continue · Tab to input · {escape_hint}\n"))
         return out
 
     def _sync_excluded_paths(self) -> tuple[Path, ...]:
@@ -745,7 +747,7 @@ class App:
                 with self.lock:
                     copying = self.sync_transfer_active
                 escape = "q/Esc stops after this file" if copying else "q/Esc closes"
-                return [("class:input.hint", f"  ↑/↓ browse · Enter select/continue · h high confidence · s select all · Tab to input · {escape}")]
+                return [("class:input.hint", f"  ↑/↓ browse · Enter select/continue · Tab to input · {escape}")]
             return [
                 ("class:input.hint", "  type URLs or commands · "),
                 ("class:dim", "Tab back to Sync"),

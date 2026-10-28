@@ -1475,3 +1475,7 @@ def test_sync_preview_shows_connected_computer_and_directory(app):
     assert ("class:ok", "  Connected Test iPhone\n") in fragments
     assert ("class:ok", "  Connected Test Mac reading /music\n") in fragments
     assert "Phone copies" not in "".join(value for _, value in fragments)
+    assert fragments[:2] == [
+        ("class:subsection", "  Preview\n"),
+        ("class:dim", "  h select high confidence · s select all\n"),
+    ]
