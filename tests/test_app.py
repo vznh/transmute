@@ -920,8 +920,13 @@ def test_sync_preview_is_read_only_until_continue_and_matched_rows_are_dim(app):
     fragments = app._render_sync()
     text = "".join(value for _, value in fragments)
     assert "Already synced" in text and "* Possible duplicate" in text
-    assert "Based on close title match" in text
+    assert "* Possible duplicate based on close title match" in text
+    assert "\n        Based on" not in text
     assert any(style == "class:dim" and "Already synced" in value for style, value in fragments)
+    assert any(
+        style == "class:dim" and "Possible duplicate based on close title match" in value
+        for style, value in fragments
+    )
 
     app.sync_select(False)
     app.sync_cursor = 3
@@ -1448,3 +1453,14 @@ def test_sync_exact_matches_have_no_checkbox_and_cannot_be_selected(app):
     assert app.sync_selected == {"new"}
     app.sync_toggle()
     assert app.sync_selected == {"new"}
+
+
+def test_sync_exact_match_reason_is_dim_not_error_red(app):
+    matched = _sync_item("matched", "matched")
+    matched.reason = "Exact SHA256 match."
+    app.sync_plan = _sync_plan(matched)
+
+    fragments = app._render_sync()
+
+    assert any(style == "class:dim" and "Exact SHA256 match" in text for style, text in fragments)
+    assert not any(style == "class:err" and "Exact SHA256 match" in text for style, text in fragments)

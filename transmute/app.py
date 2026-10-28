@@ -364,16 +364,15 @@ class App:
             name = item.track.relative_path.rsplit("/", 1)[-1]
             out.append((style, f"{marker} {selected_mark} {label}: {name[:60]}\n"))
             if item.confidence == "low":
-                out.append(("class:dim", "      * Possible duplicate\n"))
                 reason = item.reason.strip().rstrip(".")
                 prefix = "Possible duplicate based on "
                 if reason.startswith(prefix):
                     reason = reason[len(prefix) :]
                     reason = reason.replace("metadata or filename", "metadata and filename")
                 elif reason == "Same filename has different content":
-                    reason = "filename and different content"
-                if reason:
-                    out.append(("class:dim", f"        Based on {reason[:100]}\n"))
+                    reason = "filename with different content"
+                explanation = f" based on {reason}" if reason else ""
+                out.append(("class:dim", f"      * Possible duplicate{explanation[:110]}\n"))
                 if result and result.status != "done":
                     out.append(("class:err", f"        {result.status}: {result.message[:80]}\n"))
             else:
@@ -383,7 +382,8 @@ class App:
                 if result and result.status != "done":
                     details.append(f"{result.status}: {result.message[:80]}")
                 if details:
-                    out.append(("class:err", f"    {' · '.join(details)}\n"))
+                    detail_style = "class:dim" if item.direction == "matched" else "class:err"
+                    out.append((detail_style, f"    {' · '.join(details)}\n"))
         continue_index = len(items)
         marker = "❯" if cursor == continue_index else " "
         enabled = bool(selected) and not busy
