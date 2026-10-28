@@ -51,13 +51,15 @@ large features, and major increments (`0.2.6` → `1.0.0`) for revamps. Lower
 components reset to zero; letter suffixes are not used. `transmute/__init__.py`
 is the single source for the package version; `pyproject.toml` reads it.
 
-After changes reach `main`, run **Actions → prepare release** on `main` and
-choose patch, minor, or major. The manual run is the explicit release approval;
-merging a PR or pushing directly does not publish. This keeps routine changes
-from creating releases unintentionally.
+Merging a pull request into `main` automatically starts a release. Patch is the
+default; add `release:minor` for a large feature or `release:major` for a
+revamp. If several PRs merge before a release completes, the highest requested
+level is used. Direct pushes do not release. A manual **Actions → prepare
+release** run remains available for recovery and accepts a patch/minor/major
+choice.
 
-The workflow updates the version and README examples, commits the version, and
-pushes a numeric tag. That tag starts `release.yml`, which tests Python 3.10 through
+The workflow updates the version and README examples, commits and tags the
+version, then dispatches `release.yml`. That workflow tests Python 3.10 through
 3.13, verifies the tag against the built artifact, publishes to PyPI, and
 creates the GitHub release.
 

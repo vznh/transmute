@@ -57,12 +57,13 @@ Run every command from the repository root.
   derived from the lockfile and must not be hand-edited. Tagged releases update
   and push the formula automatically after PyPI publication; use `just formula`
   for local changes or to recover a failed formula-update job.
-- **D12 — Start releases manually.** After changes reach `main`, run the
-  `prepare release` GitHub Actions workflow and choose patch, minor, or major.
-  It increments the numeric version, commits it, and pushes a tag that starts
-  release. Ordinary pushes and PR merges do not publish. The release workflow
-  tests all supported Python versions before publishing to PyPI, creating a
-  GitHub release, and updating the generated Homebrew formula.
+- **D12 — Release merged pull requests automatically.** A merged PR to `main`
+  runs `prepare release`: patch by default, `release:minor` for a large feature,
+  and `release:major` for a revamp. The highest label among merged PRs since
+  the latest version tag wins. The workflow commits the version, pushes its
+  numeric tag, then dispatches the test, PyPI, GitHub, and Homebrew release
+  pipeline. Direct pushes do not release. A manual workflow run remains
+  available for recovery and accepts a patch/minor/major choice.
 
 ## 3. Product invariants
 
@@ -605,10 +606,11 @@ helper remains a separate operational and product decision under P1/P2.
 - **DEP18 — Check the licence of a new dependency.** Record its SPDX expression
   and confirm compatibility with `DEP17` before adding it.
 
-- **DEP19 — Version only through an authorized release action.** A manual
-  `prepare release` workflow run is explicit authorization to increment the
-  version and publish. Finishing local work, merging a pull request, direct
-  pushes, or prior release requests do not authorize a new version.
+- **DEP19 — Version only through an authorized release action.** Merging a PR
+  to `main` authorizes the automated version increment and release according to
+  its labels. A manual `prepare release` workflow run is also explicit
+  authorization. Finishing local work, direct pushes, or prior release
+  requests do not authorize a new version.
 
 `pymobiledevice3` provides the USB lockdown, House Arrest, and AFC operations
 needed by the Spotify sync adapter. Its `GPL-3.0-or-later` licence is compatible

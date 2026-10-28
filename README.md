@@ -243,11 +243,11 @@ Releasing to PyPI and the Homebrew tap is described in
 [`packaging/README.md`](packaging/README.md). After a dependency or version
 change, regenerate the formula with `just formula`.
 
-To release, push changes to `main`, then manually run **Actions → prepare
-release → Run workflow** on `main` and choose patch, minor, or major. The
-workflow updates the version, commits and tags it, then starts the test, PyPI,
-GitHub Release, and Homebrew formula pipeline. Ordinary pushes and PR merges do
-not publish a release.
+Merging a pull request into `main` automatically starts a release. Patch is the
+default; use the `release:minor` label for a large feature or `release:major`
+for a revamp. If several PRs merge before a release completes, the highest
+version level among them is used. Direct pushes do not release. A manual
+**Actions → prepare release → Run workflow** option remains for recovery.
 
 ## Project map
 

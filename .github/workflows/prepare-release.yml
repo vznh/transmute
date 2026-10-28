@@ -1,6 +1,9 @@
 name: prepare release
 
 on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       bump:
@@ -15,18 +18,30 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
+  pull-requests: read
 
 jobs:
   prepare:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+      # This workflow uses pull_request_target only after merge and checks out
+      # trusted main. Never check out or run code from the PR head here.
       - uses: astral-sh/setup-uv@v6
+
+      - name: Collect merged pull request labels
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr list --state merged --base main --limit 1000 --json number,labels,mergeCommit > "$RUNNER_TEMP/merged-prs.json"
 
       - name: Calculate version bump
         id: version
@@ -34,11 +49,37 @@ jobs:
           MANUAL_BUMP: ${{ inputs.bump }}
         run: |
           python - <<'PY'
+          import json
           import os
           import re
+          import subprocess
           from pathlib import Path
 
           bump = os.environ.get("MANUAL_BUMP") or ""
+          if not bump:
+              tags = subprocess.check_output(["git", "tag", "--list"], text=True).splitlines()
+              numeric_tags = [tag for tag in tags if re.fullmatch(r"\d+\.\d+\.\d+", tag)]
+              last_tag = max(numeric_tags, key=lambda tag: tuple(map(int, tag.split("."))), default=None)
+              if not last_tag:
+                  raise SystemExit("Cannot infer a release level without an existing numeric version tag")
+              if subprocess.run(["git", "merge-base", "--is-ancestor", last_tag, "HEAD"], check=False).returncode:
+                  raise SystemExit(f"Latest release tag {last_tag} is not an ancestor of main")
+              commits = set(subprocess.check_output(["git", "rev-list", f"{last_tag}..HEAD"], text=True).splitlines())
+              pull_requests = json.loads(Path(os.environ["RUNNER_TEMP"], "merged-prs.json").read_text(encoding="utf-8"))
+              levels = set()
+              for pull_request in pull_requests:
+                  merge_sha = pull_request.get("mergeCommit", {}).get("oid")
+                  if merge_sha not in commits:
+                      continue
+                  labels = {label["name"] for label in pull_request.get("labels", [])}
+                  requested = labels & {"release:minor", "release:major"}
+                  if len(requested) > 1:
+                      raise SystemExit(f"PR #{pull_request['number']} has conflicting release labels")
+                  if "release:major" in requested:
+                      levels.add("major")
+                  elif "release:minor" in requested:
+                      levels.add("minor")
+              bump = "major" if "major" in levels else "minor" if "minor" in levels else "patch"
           if bump not in {"patch", "minor", "major"}:
               raise SystemExit(f"Unsupported release level: {bump}")
 
@@ -79,3 +120,9 @@ jobs:
           git commit -m "Release ${VERSION}"
           git tag "${VERSION}"
           git push origin HEAD:main "refs/tags/${VERSION}"
+
+      - name: Start publishing workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh workflow run release.yml --ref main --field release_tag="${VERSION}"
