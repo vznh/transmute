@@ -67,17 +67,17 @@ Transmute only requires `uv run transmute`. ffmpeg is not installed for you here
 `transmute-cli` is published on PyPI. Install the current release with:
 
 ```sh
-uv tool install "transmute-cli==1.0.1"   # or: pipx install "transmute-cli==1.0.1"
+uv tool install "transmute-cli==1.0.2"   # or: pipx install "transmute-cli==1.0.2"
 brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 1.0.1
+transmute --version   # transmute 1.0.2
 ```
 
-`brew list --versions transmute` reports `1.0.1` for the PyPI-based formula.
+`brew list --versions transmute` reports `1.0.2` for the PyPI-based formula.
 The Homebrew formula installs the same PyPI release.
 
 ## Requirements
