@@ -290,7 +290,7 @@ class App:
             status = self.sync_status
             busy = self.sync_busy
             copying = self.sync_transfer_active
-        out = [("class:subsection", "  Spotify sync preview\n")]
+        out = [("class:subsection", "  Preview\n")]
         if status:
             out.append(("class:accent", f"  {status[:100]}\n"))
         if plan is None:
@@ -301,7 +301,8 @@ class App:
             )
             out.append(("class:dim", f"  {message}\n"))
             return out
-        out.append(("class:dim", f"  {plan.device_name} · {plan.out_dir}\n"))
+        out.append(("class:ok", f"  Connected {plan.device_name}\n"))
+        out.append(("class:dim", f"  {plan.out_dir}\n"))
         items = list(plan.items)
         for index, item in enumerate(items):
             result = results.get(item.id)
@@ -343,7 +344,7 @@ class App:
         suffix = " (sync running)" if busy else ("" if enabled else " (select tracks first)")
         out.append(("class:accent" if enabled else "class:dim", f"{marker} Continue{suffix}\n"))
         escape_hint = "Esc stops after this file" if copying else "Esc closes"
-        out.append(("class:dim", f"  ↑/↓ move · Enter select/continue · a high confidence · A all · Tab input · {escape_hint}\n"))
+        out.append(("class:dim", f"  ↑/↓ move · Enter select/continue · h high confidence · s select all · Tab to input · {escape_hint}\n"))
         return out
 
     def _sync_excluded_paths(self) -> tuple[Path, ...]:
@@ -441,7 +442,7 @@ class App:
             )
         size = self.app.output.get_size()
         content_height = self.sync_pane.content.preferred_height(max(size.columns - 1, 1), self.sync_pane.max_available_height).preferred
-        viewport = max(size.rows - 9, 1)
+        viewport = max(size.rows - 12, 1)
         self.sync_pane.vertical_scroll = min(max(preceding_rows - viewport + 2, 0), max(content_height - viewport, 0))
 
     def sync_scroll(self, delta: int) -> None:
@@ -667,8 +668,12 @@ class App:
                 with self.lock:
                     copying = self.sync_transfer_active
                 escape = "q/Esc stops after this file" if copying else "q/Esc closes"
-                return [("class:input.hint", f"  ↑/↓ browse · Enter select/continue · a high confidence · A all · Tab input · {escape}")]
-            return [("class:input.hint", "  type URLs or commands · Tab sync report · /sync close exits")]
+                return [("class:input.hint", f"  ↑/↓ browse · Enter select/continue · h high confidence · s select all · Tab to input · {escape}")]
+            return [
+                ("class:input.hint", "  type URLs or commands · "),
+                ("class:dim", "Tab back to Sync"),
+                ("class:input.hint", " · /sync close exits"),
+            ]
         if self.dir_picker is not None:
             if self.dir_buffer_focused:
                 if self.dir_picker.stage == "confirm":

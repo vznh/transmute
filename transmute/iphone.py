@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from typing import BinaryIO
+from uuid import uuid4
 
 _BUNDLE_ID = "com.spotify.client"
 _DOCUMENTS_ROOT = "/Documents"
@@ -148,6 +150,25 @@ class _PhoneStore:
         finally:
             self._run(self._service.fclose(handle))
 
+    def check_publish_support(self) -> None:
+        """Verify hard-link publication before uploading selected media."""
+        temporary = f".transmute-sync-{uuid4().hex}.partial"
+        probe = f".transmute-sync-{uuid4().hex}.partial"
+        try:
+            self.write_from(temporary, io.BytesIO(b""))
+            self.publish(temporary, probe)
+        except Exception:
+            for path in (temporary, probe):
+                try:
+                    self.remove(path)
+                except (OSError, FileNotFoundError):
+                    pass
+            raise
+        try:
+            self.remove(probe)
+        except Exception as exc:
+            raise _sync_error("Phone publish check succeeded, but its temporary check file could not be removed.", exc) from exc
+
     def publish(self, temporary_path: str, destination_path: str) -> None:
         temporary_path = _safe_relative(temporary_path)
         destination_path = _safe_relative(destination_path)
@@ -174,7 +195,7 @@ class _PhoneStore:
 
             if isinstance(exc, SyncError) and getattr(exc.__cause__, "status", None) == AfcError.OBJECT_EXISTS:
                 raise FileExistsError(destination_path) from exc
-            raise _sync_error("This iPhone cannot publish files atomically; no file was replaced.", exc) from exc
+            raise _sync_error("This iPhone does not support safe no-replace publishing. Transmute will not risk replacing existing files; no track was uploaded. Use Finder sync or another destination.", exc) from exc
         self.remove(temporary_path)
 
     def remove(self, relative_path: str) -> None:

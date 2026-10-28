@@ -18,7 +18,7 @@ HELP_ROWS = [
     ("/key [clear]", "securely set or clear one API key"),
     ("/list", "show recent converted and failed tracks across sessions"),
     ("/retry", "requeue all retryable failed downloads"),
-    ("/sync [spotify|music|retry|close]", "preview sync; a/A select, Enter copies, or close report"),
+    ("/sync [spotify|music|retry|close]", "preview sync; h high confidence, s select all, Enter copies"),
     ("/login [codex|claude]", "log in to a subscription provider"),
     ("/logout [codex|claude]", "log out of a subscription provider"),
     ("/clear", "clear history and messages"),

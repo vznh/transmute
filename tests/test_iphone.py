@@ -291,7 +291,7 @@ def test_publish_fails_closed_when_hardlinks_are_unsupported() -> None:
         raise OSError("hardlinks unsupported")
 
     afc.link = unsupported_link  # type: ignore[method-assign]
-    with pytest.raises(SyncError, match="cannot publish files atomically"):
+    with pytest.raises(SyncError, match="safe no-replace publishing"):
         phone.publish(temporary, "final.mp3")
     assert afc.files == {
         "/Documents/song.mp3": b"abc",

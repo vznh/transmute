@@ -942,15 +942,15 @@ def test_sync_command_music_is_truthful_and_help_documents_shortcuts(app):
     assert "Finder" in note and "unsupported" in note
     app.commands.cmd_help("")
     body = "".join(text for _, text in app._render_help())
-    assert "/sync" in body and "a/A" in body
+    assert "/sync" in body and "h high confidence" in body
 
 
 def test_sync_shortcuts_are_scoped_to_report_focus(app):
     app.sync_open = True
     app.sync_focus = False
     app.app.layout.focus(app.input_buffer)
-    select_binding = app.app.key_bindings.get_bindings_for_keys(("a",))[-1]
-    select_all_binding = app.app.key_bindings.get_bindings_for_keys(("A",))[-1]
+    select_binding = app.app.key_bindings.get_bindings_for_keys(("h",))[-1]
+    select_all_binding = app.app.key_bindings.get_bindings_for_keys(("s",))[-1]
     enter_bindings = app.app.key_bindings.get_bindings_for_keys((Keys.Enter,))
     with set_app(app.app):
         assert not select_binding.filter()
@@ -991,7 +991,8 @@ def test_sync_report_renders_at_small_terminal_sizes(app, rows, columns):
         "".join(cell.char for _, cell in sorted(row.items())).rstrip()
         for _, row in sorted(screens[0].data_buffer.items())
     )
-    assert "Spotify sync preview" in rendered
+    assert "Preview" in rendered
+    assert "Connected Test iPhone" in rendered
     assert "Continue" in rendered
     assert "two.mp3" in rendered
 
@@ -1045,7 +1046,7 @@ def test_pipe_input_keeps_draft_and_scopes_select_all_to_sync_report(app):
 
     async def run_keys():
         with create_pipe_input() as pipe:
-            pipe.send_text("a\taA\r\x04")
+            pipe.send_text("h\th s\r\x04")
             app.app.input = pipe
             app.app.output = DummyOutput()
             await app.app.run_async()
@@ -1053,7 +1054,7 @@ def test_pipe_input_keeps_draft_and_scopes_select_all_to_sync_report(app):
     asyncio.run(run_keys())
 
     assert app.sync_selected == {"maybe"}
-    assert app.input_buffer.text == "adraft"
+    assert app.input_buffer.text == "hdraft"
     assert not app.sync_busy
 
 
@@ -1111,6 +1112,7 @@ def test_sync_scroll_keeps_continue_visible_after_navigating_long_report(app):
 
     asyncio.run(navigate())
     assert app.sync_cursor == 50
+    assert app.sync_open
     assert app.sync_pane.vertical_scroll > 0
     app.app.renderer.render(app.app, app.app.layout)
     screen = app.app.renderer._last_screen

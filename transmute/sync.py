@@ -82,6 +82,7 @@ class PhoneStore(Protocol):
     def read_to(self, relative_path: str, sink: BinaryIO) -> None: ...
     def write_from(self, relative_path: str, source: BinaryIO) -> None: ...
     def publish(self, temporary_path: str, destination_path: str) -> None: ...
+    def check_publish_support(self) -> None: ...
     def remove(self, relative_path: str) -> None: ...
 
 
@@ -343,6 +344,15 @@ class SyncService:
             if phone.device_id != plan.device_id:
                 raise SyncError("The connected phone changed; preview again before syncing.")
             manifest = self._load_manifest(plan, phone.device_id)
+            phone_items = [item for item in selected if item.direction == "to_phone"]
+            publish_error: str | None = None
+            if phone_items:
+                check_publish = getattr(phone, "check_publish_support", None)
+                if check_publish is not None:
+                    try:
+                        check_publish()
+                    except Exception as exc:  # noqa: BLE001 - probe failure blocks only phone-bound copies.
+                        publish_error = _bounded_error(exc)
             for index, item in enumerate(selected, 1):
                 if cancelled and cancelled():
                     results.extend(SyncResult(rest.id, "cancelled", "Cancelled before transfer.", rest.target_name) for rest in selected[index - 1 :])
@@ -350,7 +360,9 @@ class SyncService:
                 if progress:
                     progress(SyncProgress("transfer", index, len(selected), item.target_name, item.id))
                 try:
-                    if item.direction == "to_phone":
+                    if item.direction == "to_phone" and publish_error:
+                        result = SyncResult(item.id, "error", publish_error, item.target_name)
+                    elif item.direction == "to_phone":
                         result = self._to_phone(phone, plan.out_dir, item)
                     else:
                         result = self._to_computer(phone, plan.out_dir, item)

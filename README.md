@@ -68,18 +68,18 @@ Transmute only requires `uv run transmute`. ffmpeg is not installed for you here
 skip prereleases unless asked by name:
 
 ```sh
-uv tool install "transmute-cli==0.2.3a1"   # or: pipx install "transmute-cli==0.2.3a1"
+uv tool install "transmute-cli==0.2.3a2"   # or: pipx install "transmute-cli==0.2.3a2"
 brew install ffmpeg                        # not included on this path
 ```
 
 ### Checking what you have
 
 ```sh
-transmute --version   # transmute 0.2.3a1
+transmute --version   # transmute 0.2.3a2
 ```
 
-`brew list --versions transmute` reports `0.2.3a1` for the PyPI-based formula.
-PyPI normalises the application version `0.2.3a1` to `0.2.3a1`; both name the
+`brew list --versions transmute` reports `0.2.3a2` for the PyPI-based formula.
+PyPI normalises the application version `0.2.3a2` to `0.2.3a2`; both name the
 same release.
 
 ## Requirements
@@ -172,10 +172,11 @@ read-only preview. Exact matches are marked **Already synced**; possible
 duplicates and filename conflicts are dimmed and marked with `?` for review.
 Nothing transfers until you select tracks and move to **Continue**.
 
-In the preview, use Up/Down to browse, Enter to select a row, `a` to select
-high-confidence items, and `A` to select every transferable item. Enter on
+In the preview, use Up/Down to browse, Enter to select a row, `h` to select
+high-confidence items, and `s` to select every transferable item. Enter on
 Continue starts the selected copies. Tab or Shift-Tab switches between the
-report and URL input without clearing its draft. Press `q` or Esc to close the
+report and URL input without clearing its draft. The report hint says `Tab to
+input`; the input hint shows dim `Tab back to Sync`. Press `q` or Esc to close the
 report; `/sync close` also works from the input line. While copying, these ask
 Transmute to stop between files. Completed copies stay done,
 and `/sync retry` reopens the failed or cancelled rows. Sync only adds files; it

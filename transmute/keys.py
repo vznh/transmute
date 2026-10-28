@@ -49,11 +49,11 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         app.sync_toggle()
 
-    @kb.add("a", filter=sync_focused, eager=True)
+    @kb.add("h", filter=sync_focused, eager=True)
     def _(event):
         app.sync_select(True)
 
-    @kb.add("A", filter=sync_focused, eager=True)
+    @kb.add("s", filter=sync_focused, eager=True)
     def _(event):
         app.sync_select(False)
 
@@ -73,7 +73,7 @@ def build_key_bindings(app) -> KeyBindings:
     def _(event):
         app._dir_decline_create()
 
-    @kb.add("escape", eager=True)
+    @kb.add("escape")
     def _(event):
         if app.sync_open:
             app.sync_back()

@@ -331,3 +331,27 @@ def test_changed_target_content_never_overwritten(setup_sync) -> None:
     assert result[0].status == "error"
     assert phone.files["song.mp3"] == b"different phone bytes"
     assert hashlib.sha256(phone.files["song.mp3"]).hexdigest() != plan.items[0].track.sha256
+
+
+def test_unsupported_phone_publish_fails_before_upload_and_keeps_computer_copy(setup_sync) -> None:
+    out, phone, service = setup_sync
+    put(out / "to-phone.mp3", b"full local track")
+    phone.files["from-phone.mp3"] = b"full phone track"
+    plan = service.preview(out)
+    selected = {item.id for item in plan.items}
+
+    writes: list[bytes] = []
+
+    def record_write(path: str, source) -> None:
+        value = source.read()
+        writes.append(value)
+        phone.files[path] = value
+
+    phone.write_from = record_write
+    phone.check_publish_support = lambda: (_ for _ in ()).throw(SyncError("safe no-replace unavailable"))
+    results = service.transfer(plan, selected)
+
+    assert not writes
+    assert {result.status for result in results} == {"error", "done"}
+    assert (out / "from-phone.mp3").read_bytes() == b"full phone track"
+    assert "to-phone.mp3" not in phone.files
